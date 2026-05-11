@@ -323,6 +323,26 @@
       uploadLabel.textContent = '📤 Upload Excel';
       header.appendChild(fileInput);
       header.appendChild(uploadLabel);
+            // Force Sync button
+      const syncBtn = document.createElement('button');
+      syncBtn.className = 'px-4 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 transition ml-2';
+      syncBtn.textContent = '🔄 Sync';
+      syncBtn.title = 'Force sync plan & database from server';
+      syncBtn.onclick = async function() {
+        syncBtn.textContent = '⏳ Syncing...';
+        syncBtn.disabled = true;
+        await pullDatabaseFromServer();
+        await pullFromServer();
+        refreshUI();
+        setTimeout(() => {
+          syncBtn.textContent = '✅ Synced';
+          setTimeout(() => {
+            syncBtn.textContent = '🔄 Sync';
+            syncBtn.disabled = false;
+          }, 1500);
+        }, 500);
+      };
+      header.appendChild(syncBtn);
       container.appendChild(header);
 
       if (!store.meals.length) {
