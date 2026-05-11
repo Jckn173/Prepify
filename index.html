@@ -54,22 +54,32 @@
     const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
     const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
 
-    // ========== PANTRY AUTO‑POPULATION ==========
-    // These categories are automatically tracked — no manual adding required
-    const PANTRY_CATEGORIES = ['Pantry Staples', 'Canned & Jarred', 'Dairy & Eggs'];
+    // ========== PANTRY SYSTEM ==========
+    const PANTRY_KEY = 'prepify_pantry_v2';
     
-    function getAutoPantry() {
-      const stored = localStorage.getItem('prepify_pantry_auto');
-      return stored ? JSON.parse(stored) : {};
+    function getPantryStocked() {
+      try {
+        return JSON.parse(localStorage.getItem(PANTRY_KEY) || '{}');
+      } catch(e) {
+        return {};
+      }
     }
     
-    function saveAutoPantry(pantry) {
-      localStorage.setItem('prepify_pantry_auto', JSON.stringify(pantry));
+    function markPantryItem(name) {
+      const stocked = getPantryStocked();
+      stocked[name.toLowerCase()] = Date.now();
+      localStorage.setItem(PANTRY_KEY, JSON.stringify(stocked));
     }
     
-    function isPantryItem(ingredientName) {
-      const cat = categorizeIngredient(ingredientName);
-      return PANTRY_CATEGORIES.includes(cat);
+    function unmarkPantryItem(name) {
+      const stocked = getPantryStocked();
+      delete stocked[name.toLowerCase()];
+      localStorage.setItem(PANTRY_KEY, JSON.stringify(stocked));
+    }
+    
+    function isPantryStocked(name) {
+      const stocked = getPantryStocked();
+      return !!stocked[name.toLowerCase()];
     }
 
     // ========== GLOBAL STATE ==========
@@ -101,7 +111,19 @@
         this.selectedMeals = sel; this.emit();
       },
       clearWeek() { this.selectedMeals = {}; this.emit(); },
-      toggleShoppingItem(key) { this.shoppingChecked = { ...this.shoppingChecked, [key]: !this.shoppingChecked[key] }; this.emit(); },
+      toggleShoppingItem(key) {
+        this.shoppingChecked = { ...this.shoppingChecked, [key]: !this.shoppingChecked[key] };
+        // 🆕 When a shopping item is checked off, mark pantry items as stocked
+        if (this.shoppingChecked[key]) {
+          // Find the item name from the shopping list
+          const list = this.getRawShoppingItems();
+          const item = list.find(i => (i.name?.toLowerCase().replace(/[^a-z0-9]/g,'_')) === key);
+          if (item && isPantryCategory(item.name)) {
+            markPantryItem(item.name);
+          }
+        }
+        this.emit();
+      },
       setFilters(f) { this.filters = { ...this.filters, ...f }; this.emit(); },
       resetFilters() { this.filters = { category:'', cuisine:'', difficulty:'', maxTime:'', search:'' }; this.emit(); },
       setActiveTab(tab) { this.activeTab = tab; this.emit(); },
@@ -114,7 +136,7 @@
         if (f.search) { const q = f.search.toLowerCase(); res = res.filter(m => m['Meal Name'].toLowerCase().includes(q) || m.Cuisine.toLowerCase().includes(q)); }
         return res;
       },
-      getShoppingList() {
+      getRawShoppingItems() {
         const items = [];
         DAYS.forEach(day => {
           const meal = this.selectedMeals[day]; if (!meal) return;
@@ -128,12 +150,17 @@
             (meal.Vegetables||'').split(',').forEach(v => v && items.push({ name: v.trim(), quantity: 50*serv, unit: 'g', mealRef: meal['Meal Name'], category: 'Produce' }));
           }
         });
-        // 🆕 FILTER OUT AUTO‑PANTRY ITEMS THAT ARE STOCKED
-        const pantry = getAutoPantry();
+        return items;
+      },
+      getShoppingList() {
+        const items = this.getRawShoppingItems();
+        // Filter out pantry items that are already stocked
         const filteredItems = items.filter(item => {
           const cat = categorizeIngredient(item.name);
+          // Always show produce, protein, and grains
           if (cat === 'Produce' || cat === 'Protein' || cat === 'Grains & Pasta') return true;
-          return !pantry[item.name.toLowerCase()]; // if it's in pantry → hide from shopping list
+          // For pantry-type items, check if they're stocked
+          return !isPantryStocked(item.name);
         });
         const merged = {};
         filteredItems.forEach(i => {
@@ -154,6 +181,11 @@
       if (/canned|jar|tin|can/.test(n)) return 'Canned & Jarred';
       if (/cheese|milk|cream|yoghurt|butter/.test(n)) return 'Dairy & Eggs';
       return 'Other';
+    }
+
+    function isPantryCategory(name) {
+      const cat = categorizeIngredient(name);
+      return cat === 'Pantry Staples' || cat === 'Canned & Jarred' || cat === 'Dairy & Eggs';
     }
 
     // ========== BACKEND SYNC ==========
@@ -424,154 +456,77 @@
             <button id="clearBtn" class="px-4 py-2 border border-gray-200 rounded-xl text-sm">Clear</button>
           </div>
         </div>`;
-      const grid = document.createElement('div');
-      grid.className = 'grid grid-cols-2 md:grid-cols-5 gap-4 mb-8';
+      const grid = document.createElement('div'); grid.className = 'grid grid-cols-2 md:grid-cols-5 gap-4 mb-8';
       DAYS.forEach(day => {
         const meal = store.selectedMeals[day];
-        const card = document.createElement('div');
-        card.className = 'card p-4 cursor-pointer';
+        const card = document.createElement('div'); card.className = 'card p-4 cursor-pointer';
         card.innerHTML = `<span class="text-xs font-bold uppercase text-gray-400">${day}</span>`;
         if (meal) {
-          card.innerHTML += `
-            <h3 class="font-semibold text-base">${meal['Meal Name']}</h3>
-            <div class="flex gap-2 text-xs text-gray-500"><span>${meal.Cuisine}</span><span class="badge ${meal.Difficulty==='Easy'?'diff-easy':'diff-medium'}">${meal.Difficulty}</span></div>
-            <div class="grid grid-cols-4 gap-1 text-xs mt-1">
-              <div>🔥${meal['Cal/Serve']}</div><div>💪${meal['Protein (g)']}g</div><div>🍞${meal['Carbs (g)']}g</div><div>🧈${meal['Fat (g)']}g</div>
-            </div>
-            <button class="text-xs text-red-400 remove-btn">Remove</button>`;
+          card.innerHTML += `<h3 class="font-semibold text-base">${meal['Meal Name']}</h3><div class="flex gap-2 text-xs text-gray-500"><span>${meal.Cuisine}</span><span class="badge ${meal.Difficulty==='Easy'?'diff-easy':'diff-medium'}">${meal.Difficulty}</span></div><div class="grid grid-cols-4 gap-1 text-xs mt-1"><div>🔥${meal['Cal/Serve']}</div><div>💪${meal['Protein (g)']}g</div><div>🍞${meal['Carbs (g)']}g</div><div>🧈${meal['Fat (g)']}g</div></div><button class="text-xs text-red-400 remove-btn">Remove</button>`;
           card.querySelector('.remove-btn').onclick = (e) => { e.stopPropagation(); store.removeMeal(day); refreshUI(); };
           card.onclick = () => openMealDetail(meal);
-        } else {
-          card.innerHTML += '<div class="text-gray-300 text-sm text-center py-4">+ Add</div>';
-        }
+        } else { card.innerHTML += '<div class="text-gray-300 text-sm text-center py-4">+ Add</div>'; }
         grid.appendChild(card);
       });
       sec.appendChild(grid);
       container.appendChild(sec);
-
       sec.querySelector('#autoBtn').onclick = () => { store.autoFillWeek(); refreshUI(); };
       sec.querySelector('#clearBtn').onclick = () => { store.clearWeek(); refreshUI(); };
 
-      // Filter browser (same as before)
+      // Browser
       const browser = document.createElement('div');
-      const filterPanel = document.createElement('div');
-      filterPanel.id = 'filterPanel';
-      filterPanel.className = 'card p-4 mb-4 hidden';
-
+      const filterPanel = document.createElement('div'); filterPanel.id = 'filterPanel'; filterPanel.className = 'card p-4 mb-4 hidden';
       const categories = ['All Categories', ...new Set(store.meals.map(m => m.Category))];
       const cuisines = ['All Cuisines', ...new Set(store.meals.map(m => m.Cuisine))];
       const difficulties = ['Any Difficulty', 'Easy', 'Medium'];
       const proteins = ['All Proteins', ...new Set(store.meals.flatMap(m => (m['Protein Source']||'').split(',').map(s => s.trim()).filter(Boolean)))];
-
-      const catSelect = document.createElement('select');
-      catSelect.className = 'border rounded-xl px-3 py-2 text-sm bg-white';
-      catSelect.id = 'catFilter';
-      categories.forEach(c => {
-        const opt = document.createElement('option');
-        opt.value = c === 'All Categories' ? '' : c;
-        opt.textContent = c;
-        catSelect.appendChild(opt);
+      const selects = {};
+      [['catFilter', categories], ['cuisineFilter', cuisines], ['diffFilter', difficulties], ['protFilter', proteins]].forEach(([id, opts]) => {
+        const sel = document.createElement('select'); sel.id = id; sel.className = 'border rounded-xl px-3 py-2 text-sm bg-white';
+        opts.forEach(o => { const opt = document.createElement('option'); opt.value = o.startsWith('All') || o.startsWith('Any') ? '' : o; opt.textContent = o; sel.appendChild(opt); });
+        selects[id] = sel;
       });
-
-      const cuiSelect = document.createElement('select');
-      cuiSelect.className = 'border rounded-xl px-3 py-2 text-sm bg-white';
-      cuiSelect.id = 'cuisineFilter';
-      cuisines.forEach(c => {
-        const opt = document.createElement('option');
-        opt.value = c === 'All Cuisines' ? '' : c;
-        opt.textContent = c;
-        cuiSelect.appendChild(opt);
-      });
-
-      const diffSelect = document.createElement('select');
-      diffSelect.className = 'border rounded-xl px-3 py-2 text-sm bg-white';
-      diffSelect.id = 'diffFilter';
-      difficulties.forEach(d => {
-        const opt = document.createElement('option');
-        opt.value = d === 'Any Difficulty' ? '' : d;
-        opt.textContent = d;
-        diffSelect.appendChild(opt);
-      });
-
-      const protSelect = document.createElement('select');
-      protSelect.className = 'border rounded-xl px-3 py-2 text-sm bg-white';
-      protSelect.id = 'protFilter';
-      proteins.forEach(p => {
-        const opt = document.createElement('option');
-        opt.value = p === 'All Proteins' ? '' : p;
-        opt.textContent = p;
-        protSelect.appendChild(opt);
-      });
-
-      const searchInput = document.createElement('input');
-      searchInput.type = 'text';
-      searchInput.placeholder = 'Search meals...';
-      searchInput.className = 'border rounded-xl px-3 py-2 text-sm';
-      searchInput.id = 'searchInput';
-
-      const filterGrid = document.createElement('div');
-      filterGrid.className = 'grid grid-cols-2 md:grid-cols-5 gap-3';
-      filterGrid.appendChild(catSelect);
-      filterGrid.appendChild(cuiSelect);
-      filterGrid.appendChild(diffSelect);
-      filterGrid.appendChild(protSelect);
-      filterGrid.appendChild(searchInput);
+      const searchInput = document.createElement('input'); searchInput.type = 'text'; searchInput.placeholder = 'Search meals...'; searchInput.className = 'border rounded-xl px-3 py-2 text-sm'; searchInput.id = 'searchInput';
+      const filterGrid = document.createElement('div'); filterGrid.className = 'grid grid-cols-2 md:grid-cols-5 gap-3';
+      filterGrid.append(selects['catFilter'], selects['cuisineFilter'], selects['diffFilter'], selects['protFilter'], searchInput);
       filterPanel.appendChild(filterGrid);
       browser.appendChild(filterPanel);
 
-      const filterHeader = document.createElement('div');
-      filterHeader.className = 'flex justify-between items-center mb-3';
-      const filterHeading = document.createElement('h3');
-      filterHeading.className = 'font-display text-xl font-semibold';
-      filterHeading.textContent = 'Browse Meals';
-      const filterToggleBtn = document.createElement('button');
-      filterToggleBtn.className = 'text-sm border border-gray-200 px-4 py-2 rounded-xl hover:bg-gray-50 transition';
-      filterToggleBtn.textContent = '🔽 Filters';
-      filterToggleBtn.id = 'filterToggle';
-      filterToggleBtn.addEventListener('click', () => { filterPanel.classList.toggle('hidden'); });
-      filterHeader.appendChild(filterHeading);
+      const filterHeader = document.createElement('div'); filterHeader.className = 'flex justify-between items-center mb-3';
+      filterHeader.innerHTML = '<h3 class="font-display text-xl font-semibold">Browse Meals</h3>';
+      const filterToggleBtn = document.createElement('button'); filterToggleBtn.className = 'text-sm border border-gray-200 px-4 py-2 rounded-xl hover:bg-gray-50 transition'; filterToggleBtn.textContent = '🔽 Filters';
+      filterToggleBtn.addEventListener('click', () => filterPanel.classList.toggle('hidden'));
       filterHeader.appendChild(filterToggleBtn);
       browser.appendChild(filterHeader);
 
-      const mealGrid = document.createElement('div');
-      mealGrid.id = 'mealGrid';
-      mealGrid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-96 overflow-y-auto pr-1';
+      const mealGrid = document.createElement('div'); mealGrid.id = 'mealGrid'; mealGrid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-96 overflow-y-auto pr-1';
       browser.appendChild(mealGrid);
       sec.appendChild(browser);
       container.appendChild(sec);
 
       const updateMealGrid = () => {
         const filtered = store.getFilteredMeals();
-        const protVal = protSelect.value;
+        const protVal = selects['protFilter'].value;
         const finalMeals = protVal ? filtered.filter(m => (m['Protein Source']||'').toLowerCase().includes(protVal.toLowerCase())) : filtered;
         mealGrid.innerHTML = finalMeals.length ? '' : '<p class="col-span-full text-center text-gray-400 py-10">No meals match.</p>';
         finalMeals.forEach(meal => {
-          const card = document.createElement('div');
-          card.className = 'card p-3 flex flex-col gap-1 cursor-pointer';
-          card.innerHTML = `
-            <div class="flex justify-between">
-              <h4 class="font-semibold text-sm">${meal['Meal Name']}</h4>
-              <span class="badge badge-${meal.Category.toLowerCase().replace(' ','-')}">${meal.Category}</span>
-            </div>
-            <div class="text-xs text-gray-500">${meal.Cuisine} · ${meal.Difficulty} · ${meal['Cal/Serve']} cal</div>
-            <button class="mt-2 text-xs bg-green-700 text-white px-3 py-1.5 rounded-lg add-btn">+ Add</button>`;
+          const card = document.createElement('div'); card.className = 'card p-3 flex flex-col gap-1 cursor-pointer';
+          card.innerHTML = `<div class="flex justify-between"><h4 class="font-semibold text-sm">${meal['Meal Name']}</h4><span class="badge badge-${meal.Category.toLowerCase().replace(' ','-')}">${meal.Category}</span></div><div class="text-xs text-gray-500">${meal.Cuisine} · ${meal.Difficulty} · ${meal['Cal/Serve']} cal</div><button class="mt-2 text-xs bg-green-700 text-white px-3 py-1.5 rounded-lg add-btn">+ Add</button>`;
           card.querySelector('.add-btn').onclick = (e) => { e.stopPropagation(); openDayPicker(meal); };
           card.onclick = () => openMealDetail(meal);
           mealGrid.appendChild(card);
         });
       };
-
       updateMealGrid();
 
-      const applyFilters = () => {
-        store.setFilters({ category: catSelect.value, cuisine: cuiSelect.value, difficulty: diffSelect.value });
+      const apply = () => {
+        store.setFilters({ category: selects['catFilter'].value, cuisine: selects['cuisineFilter'].value, difficulty: selects['diffFilter'].value });
         updateMealGrid();
       };
-
-      catSelect.addEventListener('change', applyFilters);
-      cuiSelect.addEventListener('change', applyFilters);
-      diffSelect.addEventListener('change', applyFilters);
-      protSelect.addEventListener('change', updateMealGrid);
+      selects['catFilter'].addEventListener('change', apply);
+      selects['cuisineFilter'].addEventListener('change', apply);
+      selects['diffFilter'].addEventListener('change', apply);
+      selects['protFilter'].addEventListener('change', updateMealGrid);
       searchInput.addEventListener('input', (e) => { store.setFilters({ search: e.target.value }); updateMealGrid(); });
     }
 
@@ -579,11 +534,7 @@
     function renderShopping(container) {
       const list = store.getShoppingList();
       const sec = document.createElement('div');
-      sec.innerHTML = `
-        <div class="flex justify-between items-center mb-4">
-          <h2 class="font-display text-2xl font-semibold">Shopping List</h2>
-          <div class="flex gap-2">${list.length ? `<button id="copyBtn" class="px-3 py-1.5 border rounded-xl text-sm">📋 Copy</button><button id="pdfBtn" class="px-3 py-1.5 bg-gray-800 text-white rounded-xl text-sm">PDF</button>` : ''}</div>
-        </div>`;
+      sec.innerHTML = `<div class="flex justify-between items-center mb-4"><h2 class="font-display text-2xl font-semibold">Shopping List</h2><div class="flex gap-2">${list.length ? `<button id="copyBtn" class="px-3 py-1.5 border rounded-xl text-sm">📋 Copy</button><button id="pdfBtn" class="px-3 py-1.5 bg-gray-800 text-white rounded-xl text-sm">PDF</button>` : ''}</div></div>`;
       const content = document.createElement('div'); content.className = 'card p-5';
       if (!list.length) content.innerHTML = '<p class="text-gray-400 text-center py-12">Select meals first. Pantry items are automatically hidden.</p>';
       else {
@@ -593,38 +544,28 @@
           div.innerHTML = `<h3 class="text-sm font-semibold text-gray-500 uppercase mb-2">${cat} (${items.length})</h3>`;
           items.forEach(item => {
             const row = document.createElement('div'); row.className = `shopping-item flex items-center gap-3 py-2.5 px-2 rounded-xl cursor-pointer hover:bg-gray-50 ${store.shoppingChecked[item.key] ? 'checked' : ''}`;
-            row.innerHTML = `
-              <div class="check-dot w-5 h-5 rounded-full border-2 flex items-center justify-center text-white text-xs font-bold" style="background:${store.shoppingChecked[item.key]?'#8B9D6B':'white'};border-color:${store.shoppingChecked[item.key]?'#8B9D6B':'#d4cfc6'}">${store.shoppingChecked[item.key]?'✓':''}</div>
-              <span class="item-text text-sm flex-1 font-medium">${item.name} — ${item.quantity}${item.unit}</span>
-              <span class="text-xs text-gray-400 hidden sm:inline">${item.mealRefs.join(', ')}</span>`;
+            row.innerHTML = `<div class="check-dot w-5 h-5 rounded-full border-2 flex items-center justify-center text-white text-xs font-bold" style="background:${store.shoppingChecked[item.key]?'#8B9D6B':'white'};border-color:${store.shoppingChecked[item.key]?'#8B9D6B':'#d4cfc6'}">${store.shoppingChecked[item.key]?'✓':''}</div><span class="item-text text-sm flex-1 font-medium">${item.name} — ${item.quantity}${item.unit}</span><span class="text-xs text-gray-400 hidden sm:inline">${item.mealRefs.join(', ')}</span>`;
             row.onclick = () => { store.toggleShoppingItem(item.key); refreshUI(); };
             div.appendChild(row);
           });
           content.appendChild(div);
         });
-        const total = list.length; const checked = list.filter(i => store.shoppingChecked[i.key]).length;
-        content.appendChild(Object.assign(document.createElement('div'), { className: 'mt-4 pt-3 border-t border-gray-100 text-sm text-gray-500 flex justify-between', innerHTML: `<span>${checked}/${total} checked</span><span>${total-checked} remaining</span>` }));
+        content.appendChild(Object.assign(document.createElement('div'), { className: 'mt-4 pt-3 border-t border-gray-100 text-sm text-gray-500 flex justify-between', innerHTML: `${list.filter(i=>store.shoppingChecked[i.key]).length}/${list.length} checked` }));
       }
       sec.appendChild(content);
       container.appendChild(sec);
       sec.querySelector('#copyBtn')?.addEventListener('click', () => {
-        let text = '🛒 PREPIFY SHOPPING LIST\n\n';
-        const groups = {}; list.forEach(i => { if (!groups[i.category]) groups[i.category] = []; groups[i.category].push(i); });
-        Object.entries(groups).forEach(([cat, items]) => { text += `📦 ${cat}\n`; items.forEach(i => text += `  ${store.shoppingChecked[i.key]?'☑':'☐'} ${i.name} — ${i.quantity}${i.unit}\n`); });
-        navigator.clipboard.writeText(text).then(() => alert('Copied!'));
-      });
-      sec.querySelector('#pdfBtn')?.addEventListener('click', () => {
-        const { jsPDF } = window.jspdf; const doc = new jsPDF(); doc.setFontSize(16); doc.text('Shopping List', 20, 20); let y = 30;
-        const groups = {}; list.forEach(i => { if (!groups[i.category]) groups[i.category] = []; groups[i.category].push(i); });
-        Object.entries(groups).forEach(([cat, items]) => { if (y > 270) { doc.addPage(); y = 20; } doc.setFontSize(10); doc.text(cat, 20, y); y += 6; items.forEach(i => { if (y > 275) { doc.addPage(); y = 20; } doc.text(`${store.shoppingChecked[i.key]?'[x]':'[ ]'} ${i.name} - ${i.quantity}${i.unit}`, 25, y); y += 5; }); y += 3; });
-        doc.save('prepify-shopping.pdf');
+        let t = '🛒 SHOPPING LIST\n\n';
+        const g = {}; list.forEach(i => { if(!g[i.category]) g[i.category]=[]; g[i.category].push(i); });
+        Object.entries(g).forEach(([c,items]) => { t += `📦 ${c}\n`; items.forEach(i => t += `  ${store.shoppingChecked[i.key]?'☑':'☐'} ${i.name} — ${i.quantity}${i.unit}\n`); });
+        navigator.clipboard.writeText(t).then(() => alert('Copied!'));
       });
     }
 
     // ========== METHODS TAB ==========
     function renderMethods(container) {
       const sec = document.createElement('div');
-      sec.innerHTML = `<h2 class="font-display text-2xl font-semibold mb-4">👨‍🍳 Cooking Methods</h2>`;
+      sec.innerHTML = '<h2 class="font-display text-2xl font-semibold mb-4">👨‍🍳 Cooking Methods</h2>';
       const grid = document.createElement('div'); grid.className = 'space-y-4';
       let has = false;
       DAYS.forEach(day => {
@@ -635,144 +576,113 @@
         card.innerHTML = `<h3 class="font-semibold text-lg">${meal['Meal Name']} <span class="text-sm text-gray-500">(${day})</span></h3><p class="text-sm mt-2 whitespace-pre-line leading-relaxed">${method}</p>`;
         grid.appendChild(card);
       });
-      if (!has) grid.innerHTML = '<p class="text-gray-400 text-center py-12">No methods available. Upload an Excel file with a Methods sheet, then select meals.</p>';
+      if (!has) grid.innerHTML = '<p class="text-gray-400 text-center py-12">No methods available.</p>';
       sec.appendChild(grid);
       container.appendChild(sec);
     }
 
-    // ========== CHEF TAB (NO LOGIN) ==========
+    // ========== CHEF TAB ==========
     function renderChefTab(container) {
       const sec = document.createElement('div'); sec.className = 'space-y-6';
       sec.innerHTML = '<h2 class="font-display text-2xl font-semibold">👨‍🍳 Chef\'s Command Center</h2>';
-
       const selectedMeals = DAYS.map(d => store.selectedMeals[d]).filter(Boolean);
-
       if (!selectedMeals.length) {
-        const empty = document.createElement('div'); empty.className = 'card p-8 text-center';
-        empty.innerHTML = '<p class="text-gray-400 text-lg">No meals selected this week.</p><p class="text-gray-300 text-sm mt-1">Add meals in the Planner tab first.</p>';
-        sec.appendChild(empty);
-        container.appendChild(sec);
-        return;
+        sec.innerHTML += '<div class="card p-8 text-center"><p class="text-gray-400 text-lg">No meals selected.</p></div>';
+        container.appendChild(sec); return;
       }
 
-      // ===== WEEKLY SUMMARY =====
-      const totalCal = selectedMeals.reduce((s, m) => s + (m['Cal/Serve'] || 0), 0);
-      const totalProt = selectedMeals.reduce((s, m) => s + (m['Protein (g)'] || 0), 0);
-      const totalPrep = selectedMeals.reduce((s, m) => s + (m['Prep Time (min)'] || 0), 0);
-      const totalCook = selectedMeals.reduce((s, m) => s + (m['Cook Time (min)'] || 0), 0);
+      // Summary
+      const tc = selectedMeals.reduce((s,m)=>s+(m['Cal/Serve']||0),0);
+      const tp = selectedMeals.reduce((s,m)=>s+(m['Protein (g)']||0),0);
+      const tpr = selectedMeals.reduce((s,m)=>s+(m['Prep Time (min)']||0),0);
+      const tco = selectedMeals.reduce((s,m)=>s+(m['Cook Time (min)']||0),0);
+      const sum = document.createElement('div'); sum.className = 'card p-5';
+      sum.innerHTML = `<h3 class="font-semibold text-lg mb-4">📊 Weekly Summary</h3><div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center"><div class="bg-gray-50 rounded-xl p-3"><p class="text-xs text-gray-500">Calories</p><p class="text-2xl font-bold">${tc}</p></div><div class="bg-gray-50 rounded-xl p-3"><p class="text-xs text-gray-500">Protein</p><p class="text-2xl font-bold">${tp}g</p></div><div class="bg-gray-50 rounded-xl p-3"><p class="text-xs text-gray-500">Prep</p><p class="text-2xl font-bold">${tpr}m</p></div><div class="bg-gray-50 rounded-xl p-3"><p class="text-xs text-gray-500">Cook</p><p class="text-2xl font-bold">${tco}m</p></div></div>`;
+      sec.appendChild(sum);
 
-      const summaryCard = document.createElement('div'); summaryCard.className = 'card p-5';
-      summaryCard.innerHTML = `
-        <h3 class="font-semibold text-lg mb-4">📊 Weekly Summary</h3>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
-          <div class="bg-gray-50 rounded-xl p-3"><p class="text-xs text-gray-500">Calories</p><p class="text-2xl font-bold">${totalCal}</p></div>
-          <div class="bg-gray-50 rounded-xl p-3"><p class="text-xs text-gray-500">Protein</p><p class="text-2xl font-bold">${totalProt}g</p></div>
-          <div class="bg-gray-50 rounded-xl p-3"><p class="text-xs text-gray-500">Prep</p><p class="text-2xl font-bold">${totalPrep}m</p></div>
-          <div class="bg-gray-50 rounded-xl p-3"><p class="text-xs text-gray-500">Cook</p><p class="text-2xl font-bold">${totalCook}m</p></div>
-        </div>`;
-      sec.appendChild(summaryCard);
-
-      // ===== BATCHED PREP LIST =====
-      const prepCard = document.createElement('div'); prepCard.className = 'card p-5';
-      prepCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">🔪 Batched Prep List</h3>';
-
-      const allIngredients = [];
+      // Batched Prep List
+      const prep = document.createElement('div'); prep.className = 'card p-5';
+      prep.innerHTML = '<h3 class="font-semibold text-lg mb-4">🔪 Batched Prep List</h3>';
+      const allIng = [];
       selectedMeals.forEach(meal => {
         const ingData = store.ingredientsMap[meal.ID];
-        if (ingData && ingData.length) {
-          ingData.forEach(i => allIngredients.push({ ...i, mealName: meal['Meal Name'], day: DAYS.find(d => store.selectedMeals[d]?.ID === meal.ID) }));
-        }
+        if (ingData) ingData.forEach(i => allIng.push({ ...i, mealName: meal['Meal Name'] }));
       });
-
       const batched = {};
-      allIngredients.forEach(ing => {
-        const key = ing.name.toLowerCase().replace(/[^a-z0-9]/g,'_');
-        if (!batched[key]) batched[key] = { name: ing.name, totalQty: 0, unit: ing.unit, meals: [] };
-        batched[key].totalQty += ing.quantity || 0;
-        if (!batched[key].meals.find(m => m.name === ing.mealName)) batched[key].meals.push({ name: ing.mealName, day: ing.day });
+      allIng.forEach(i => {
+        const k = i.name.toLowerCase().replace(/[^a-z0-9]/g,'_');
+        if (!batched[k]) batched[k] = { name: i.name, totalQty: 0, unit: i.unit, meals: [] };
+        batched[k].totalQty += i.quantity||0;
+        if (!batched[k].meals.find(m=>m.name===i.mealName)) batched[k].meals.push({ name: i.mealName });
       });
+      const sorted = Object.values(batched).sort((a,b)=>a.name.localeCompare(b.name));
+      const bGrid = document.createElement('div'); bGrid.className = 'space-y-2 max-h-96 overflow-y-auto';
+      sorted.forEach(item => {
+        const r = document.createElement('div'); r.className = 'flex items-center gap-3 py-2.5 px-3 rounded-xl bg-gray-50';
+        r.innerHTML = `<input type="checkbox" class="h-5 w-5 accent-green-700 flex-shrink-0"><div class="flex-1"><p class="font-semibold text-sm">${item.name} <span class="text-gray-500 font-normal text-xs">— ${Math.round(item.totalQty)}${item.unit} total</span></p><p class="text-xs text-gray-400">Used in: ${item.meals.map(m=>m.name).join(', ')}</p></div>`;
+        bGrid.appendChild(r);
+      });
+      prep.appendChild(bGrid);
+      sec.appendChild(prep);
 
-      const sortedBatched = Object.values(batched).sort((a, b) => a.name.localeCompare(b.name));
-
-      if (sortedBatched.length) {
-        const batchedGrid = document.createElement('div'); batchedGrid.className = 'space-y-2 max-h-96 overflow-y-auto';
-        sortedBatched.forEach(item => {
-          const row = document.createElement('div'); row.className = 'flex items-center gap-3 py-2.5 px-3 rounded-xl bg-gray-50';
-          row.innerHTML = `
-            <input type="checkbox" class="h-5 w-5 accent-green-700 flex-shrink-0">
-            <div class="flex-1">
-              <p class="font-semibold text-sm">${item.name} <span class="text-gray-500 font-normal text-xs">— ${Math.round(item.totalQty)}${item.unit} total</span></p>
-              <p class="text-xs text-gray-400">Used in: ${item.meals.map(m => m.name).join(', ')}</p>
-            </div>`;
-          batchedGrid.appendChild(row);
-        });
-        prepCard.appendChild(batchedGrid);
-      }
-      sec.appendChild(prepCard);
-
-      // ===== AUTO‑PANTRY =====
+      // Auto Pantry (scroll position preserved by not re-rendering the entire tab)
       const pantryCard = document.createElement('div'); pantryCard.className = 'card p-5';
-      pantryCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">🧂 Auto‑Pantry <span class="text-xs text-gray-400 font-normal">(from spreadsheet)</span></h3>';
-      pantryCard.innerHTML += '<p class="text-xs text-gray-400 mb-3">Uncheck items you\'ve run out of — they\'ll appear in your shopping list.</p>';
-
-      // Build auto‑pantry from all ingredients in the database
-      const autoPantry = getAutoPantry();
+      pantryCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">🧂 Pantry <span class="text-xs text-gray-400 font-normal">(auto‑populated from spreadsheet)</span></h3><p class="text-xs text-gray-400 mb-3">✓ = stocked (won\'t appear in shopping list)</p>';
+      
       const allDbIngredients = new Set();
       Object.values(store.ingredientsMap).forEach(ings => ings.forEach(i => allDbIngredients.add(i.name)));
-
-      const pantryList = document.createElement('div'); pantryList.className = 'space-y-2 max-h-64 overflow-y-auto';
+      
+      const pantryList = document.createElement('div'); pantryList.className = 'space-y-2 max-h-72 overflow-y-auto';
       [...allDbIngredients].sort().forEach(name => {
-        if (!isPantryItem(name)) return; // only show pantry‑type items
-        const key = name.toLowerCase();
-        const stocked = autoPantry.hasOwnProperty(key) ? autoPantry[key] : true; // default stocked
+        if (!isPantryCategory(name)) return;
+        const isStocked = isPantryStocked(name);
         const row = document.createElement('div');
-        row.className = `flex items-center gap-3 py-2 px-3 rounded-xl ${stocked ? 'bg-green-50' : 'bg-red-50'}`;
+        row.className = `flex items-center gap-3 py-2 px-3 rounded-xl ${isStocked ? 'bg-green-50' : 'bg-red-50'}`;
         row.innerHTML = `
-          <input type="checkbox" class="h-5 w-5 accent-green-700" ${stocked ? 'checked' : ''}>
-          <span class="flex-1 text-sm font-medium ${stocked ? 'text-green-800' : 'text-red-800'}">${name}</span>
-          <span class="text-xs text-gray-400">${stocked ? '✅ Stocked' : '❌ Empty'}</span>`;
-        row.querySelector('input').addEventListener('change', (e) => {
-          const updated = getAutoPantry();
+          <input type="checkbox" class="h-5 w-5 accent-green-700 pantry-cb" ${isStocked ? 'checked' : ''}>
+          <span class="flex-1 text-sm font-medium ${isStocked ? 'text-green-800' : 'text-red-800'}">${name}</span>
+          <span class="text-xs text-gray-400">${isStocked ? '✅ Stocked' : '❌ Need to buy'}</span>`;
+        row.querySelector('.pantry-cb').addEventListener('change', (e) => {
           if (e.target.checked) {
-            updated[name.toLowerCase()] = true;
+            markPantryItem(name);
           } else {
-            updated[name.toLowerCase()] = false;
+            unmarkPantryItem(name);
           }
-          saveAutoPantry(updated);
-          refreshUI();
+          // Update only this row's styling without full re-render
+          row.className = `flex items-center gap-3 py-2 px-3 rounded-xl ${e.target.checked ? 'bg-green-50' : 'bg-red-50'}`;
+          row.querySelector('span:first-of-type').className = `flex-1 text-sm font-medium ${e.target.checked ? 'text-green-800' : 'text-red-800'}`;
+          row.querySelector('span:last-of-type').textContent = e.target.checked ? '✅ Stocked' : '❌ Need to buy';
+          // Refresh shopping list if needed
+          if (store.activeTab === 'shopping') refreshUI();
         });
         pantryList.appendChild(row);
       });
       pantryCard.appendChild(pantryList);
       sec.appendChild(pantryCard);
 
-      // ===== DELIVERY TRACKER =====
-      const trackerCard = document.createElement('div'); trackerCard.className = 'card p-5';
-      trackerCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">📦 Delivery Tracker</h3>';
-      const trackerGrid = document.createElement('div'); trackerGrid.className = 'grid grid-cols-1 md:grid-cols-5 gap-3';
+      // Delivery Tracker
+      const track = document.createElement('div'); track.className = 'card p-5';
+      track.innerHTML = '<h3 class="font-semibold text-lg mb-4">📦 Delivery Tracker</h3>';
+      const tGrid = document.createElement('div'); tGrid.className = 'grid grid-cols-1 md:grid-cols-5 gap-3';
       DAYS.forEach(day => {
         const meal = store.selectedMeals[day];
         const col = document.createElement('div'); col.className = 'border rounded-xl p-3';
         col.innerHTML = `<p class="text-xs font-bold uppercase text-gray-500 mb-2">${day}</p>`;
         if (meal) {
           col.innerHTML += `<p class="font-semibold text-sm">${meal['Meal Name']}</p>`;
-          ['Cooked', 'Packed', 'Delivered'].forEach(status => {
-            col.innerHTML += `<label class="flex items-center gap-2 mt-2 text-xs cursor-pointer"><input type="checkbox" class="accent-green-700 h-4 w-4"> <span>${status}</span></label>`;
-          });
-        } else {
-          col.innerHTML += '<p class="text-gray-300 text-xs">No meal</p>';
-        }
-        trackerGrid.appendChild(col);
+          ['Cooked','Packed','Delivered'].forEach(s => col.innerHTML += `<label class="flex items-center gap-2 mt-2 text-xs cursor-pointer"><input type="checkbox" class="accent-green-700 h-4 w-4"> <span>${s}</span></label>`);
+        } else col.innerHTML += '<p class="text-gray-300 text-xs">No meal</p>';
+        tGrid.appendChild(col);
       });
-      trackerCard.appendChild(trackerGrid);
-      sec.appendChild(trackerCard);
+      track.appendChild(tGrid);
+      sec.appendChild(track);
 
-      // ===== ALLERGEN WARNINGS =====
-      const allAllergens = new Set(selectedMeals.flatMap(m => (m.Allergens||'').split(',').map(s => s.trim()).filter(Boolean)));
-      if (allAllergens.size > 0) {
-        const allergenCard = document.createElement('div'); allergenCard.className = 'card p-5 border-red-200 bg-red-50';
-        allergenCard.innerHTML = `<h3 class="font-semibold text-lg mb-2 text-red-700">⚠️ Allergens</h3><p class="text-sm text-red-600">This week: ${[...allAllergens].join(', ')}</p>`;
-        sec.appendChild(allergenCard);
+      // Allergens
+      const allergens = new Set(selectedMeals.flatMap(m=>(m.Allergens||'').split(',').map(s=>s.trim()).filter(Boolean)));
+      if (allergens.size) {
+        const aCard = document.createElement('div'); aCard.className = 'card p-5 border-red-200 bg-red-50';
+        aCard.innerHTML = `<h3 class="font-semibold text-lg mb-2 text-red-700">⚠️ Allergens</h3><p class="text-sm text-red-600">This week: ${[...allergens].join(', ')}</p>`;
+        sec.appendChild(aCard);
       }
 
       container.appendChild(sec);
