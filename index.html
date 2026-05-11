@@ -125,7 +125,7 @@
     async function pushDatabaseToServer() {
       if (!store.meals.length) return;
       try {
-        await fetch(`${API_BASE}/api/database`, {
+        const res = await fetch(`${API_BASE}/api/database`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -135,9 +135,16 @@
             lastModified: Date.now()
           })
         });
-      } catch(e) {}
+        const data = await res.json();
+        if (!data.success) {
+          console.warn('Database push rejected (maybe outdated):', data.message);
+        }
+      } catch(e) {
+        console.error('Database push failed:', e);
+        alert('Failed to save your meal database to the server. Please try again later.');
+      }
     }
-
+    
     async function pullFromServer() {
       if (!store.meals.length) return;
       try {
