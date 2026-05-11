@@ -33,8 +33,8 @@
   <div id="app"></div>
 
   <script>
-    // ⚙️ SET YOUR BACKEND URL
-    const API_BASE = 'https://prepify-backend-pmbg.onrender.com';
+    // ⚙️ CHANGE THIS TO YOUR BACKEND URL
+    const API_BASE = 'https://prepify-backend-xxxx.onrender.com';
 
     const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
     const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
@@ -188,7 +188,6 @@
         'Carb Source': r['Carb Source']||'', 'Protein Source': r['Protein Source']||'', Vegetables: r.Vegetables||''
       }));
       store.setMeals(meals);
-
       const ingSheet = wb.SheetNames.find(n => n.toLowerCase().includes('ingredient'));
       if (ingSheet) {
         const ingMap = {};
@@ -199,7 +198,6 @@
         });
         store.setIngredientsMap(ingMap);
       }
-
       const methSheet = wb.SheetNames.find(n => n.toLowerCase().includes('method'));
       if (methSheet) {
         const methMap = {};
@@ -210,16 +208,28 @@
       }
     }
 
-    function handleFileUpload(e) {
-      const file = e.target.files[0]; if (!file) return;
+    // FIXED: global handler, no dependency on label/input nesting
+    window.handleFileUpload = function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      console.log('File selected:', file.name);
       const reader = new FileReader();
-      reader.onload = ev => {
-        try { parseWorkbook(XLSX.read(new Uint8Array(ev.target.result), {type:'array'})); store.clearWeek(); refreshUI(); }
-        catch(err) { alert('Error: '+err.message); }
+      reader.onload = function(ev) {
+        try {
+          const wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array' });
+          console.log('Sheets found:', wb.SheetNames);
+          parseWorkbook(wb);
+          store.clearWeek();
+          console.log('Meals loaded:', store.meals.length);
+          refreshUI();
+        } catch (err) {
+          alert('Parse error: ' + err.message);
+          console.error(err);
+        }
       };
       reader.readAsArrayBuffer(file);
       e.target.value = '';
-    }
+    };
 
     // ========== MODALS ==========
     function openMealDetail(meal) {
@@ -270,24 +280,35 @@
       const app = document.getElementById('app'); app.innerHTML = '';
       const container = document.createElement('div'); container.className = 'max-w-6xl mx-auto px-4 py-6';
 
-      // Header
       const header = document.createElement('header'); header.className = 'flex flex-wrap items-center justify-between gap-3 mb-6';
       header.innerHTML = `<div class="flex items-center gap-3"><div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#C17A5C] to-[#E8A849] flex items-center justify-center text-white font-bold text-lg">P</div><div><h1 class="font-display text-2xl font-bold">Prepify</h1><p class="text-xs text-gray-500 uppercase tracking-wider">Synced Meal Prep</p></div></div>`;
-      const uploadLabel = document.createElement('label');
-      uploadLabel.className = 'inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-dashed border-gray-300 bg-white/80 hover:bg-orange-50 cursor-pointer text-sm font-medium';
-      uploadLabel.innerHTML = '📤 Upload Excel';
-      const fileInput = document.createElement('input'); fileInput.type = 'file'; fileInput.accept = '.xlsx,.xls'; fileInput.className = 'hidden';
-      fileInput.onchange = handleFileUpload;
-      uploadLabel.appendChild(fileInput);
-      header.appendChild(uploadLabel);
+      
+      // FIX: use a plain button + hidden input, not a label wrapping the input
+      const uploadWrap = document.createElement('div');
+      uploadWrap.className = 'inline-flex items-center gap-2';
+      const uploadBtn = document.createElement('button');
+      uploadBtn.className = 'px-4 py-2.5 rounded-xl border border-dashed border-gray-300 bg-white/80 hover:bg-orange-50 text-sm font-medium';
+      uploadBtn.textContent = '📤 Upload Excel';
+      uploadBtn.onclick = function() {
+        const input = document.getElementById('fileInput');
+        if (input) input.click();
+      };
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = '.xlsx,.xls';
+      fileInput.className = 'hidden';
+      fileInput.id = 'fileInput';
+      fileInput.addEventListener('change', window.handleFileUpload);
+      uploadWrap.appendChild(uploadBtn);
+      uploadWrap.appendChild(fileInput);
+      header.appendChild(uploadWrap);
       container.appendChild(header);
 
       if (!store.meals.length) {
-        container.innerHTML += '<div class="text-center py-20"><h2 class="font-display text-2xl font-semibold mb-2">No meal database loaded</h2><p class="text-gray-500">Upload your Excel file to begin.</p></div>';
+        container.innerHTML += '<div class="text-center py-20"><h2 class="font-display text-2xl font-semibold mb-2">No meal database loaded</h2><p class="text-gray-500">Click "Upload Excel" to begin.</p></div>';
         app.appendChild(container); return;
       }
 
-      // Tabs
       const tabs = document.createElement('div'); tabs.className = 'flex gap-2 bg-gray-100/80 p-1.5 rounded-2xl w-fit mb-6';
       ['planner','shopping','methods','admin'].forEach(t => {
         const btn = document.createElement('button'); btn.className = `tab-btn ${store.activeTab === t ? 'active' : ''}`;
@@ -297,14 +318,10 @@
       });
       container.appendChild(tabs);
 
-      try {
-        if (store.activeTab === 'planner') renderPlanner(container);
-        else if (store.activeTab === 'shopping') renderShopping(container);
-        else if (store.activeTab === 'methods') renderMethods(container);
-        else if (store.activeTab === 'admin') renderAdminPanel(container);
-      } catch(e) {
-        container.innerHTML += `<div class="text-red-500 p-4">Error: ${e.message}</div>`;
-      }
+      if (store.activeTab === 'planner') renderPlanner(container);
+      else if (store.activeTab === 'shopping') renderShopping(container);
+      else if (store.activeTab === 'methods') renderMethods(container);
+      else if (store.activeTab === 'admin') renderAdminPanel(container);
 
       app.appendChild(container);
     }
@@ -329,7 +346,6 @@
       sec.querySelector('#autoBtn').onclick = () => { store.autoFillWeek(); refreshUI(); };
       sec.querySelector('#clearBtn').onclick = () => { store.clearWeek(); refreshUI(); };
 
-      // Browser
       const browser = document.createElement('div');
       browser.innerHTML = `<div class="flex justify-between items-center mb-3"><h3 class="font-display text-xl font-semibold">Browse Meals</h3><button id="filterToggle" class="text-sm border px-4 py-2 rounded-xl">🔽 Filters</button></div><div id="filterPanel" class="card p-4 mb-4 hidden"></div><div id="mealGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-96 overflow-y-auto"></div>`;
       sec.appendChild(browser);
@@ -368,7 +384,7 @@
       const sec = document.createElement('div');
       sec.innerHTML = `<div class="flex justify-between items-center mb-4"><h2 class="font-display text-2xl font-semibold">Shopping List</h2><div class="flex gap-2">${list.length ? `<button id="copyBtn" class="px-3 py-1.5 border rounded-xl text-sm">📋 Copy</button><button id="pdfBtn" class="px-3 py-1.5 bg-gray-800 text-white rounded-xl text-sm">PDF</button>` : ''}</div></div>`;
       const content = document.createElement('div'); content.className = 'card p-5';
-      if (!list.length) content.innerHTML = '<p class="text-gray-400 text-center py-12">Select meals in the Planner first.</p>';
+      if (!list.length) content.innerHTML = '<p class="text-gray-400 text-center py-12">Select meals first.</p>';
       else {
         const grouped = {}; list.forEach(i => { if (!grouped[i.category]) grouped[i.category] = []; grouped[i.category].push(i); });
         Object.entries(grouped).forEach(([cat, items]) => {
@@ -413,177 +429,105 @@
         card.innerHTML = `<h3 class="font-semibold text-lg">${meal['Meal Name']} <span class="text-sm text-gray-500">(${day})</span></h3><p class="text-sm mt-2 whitespace-pre-line">${method}</p>`;
         grid.appendChild(card);
       });
-      if (!has) grid.innerHTML = '<p class="text-gray-400 text-center py-12">No methods available. Upload an Excel file with a Methods sheet, then select meals.</p>';
+      if (!has) grid.innerHTML = '<p class="text-gray-400 text-center py-12">No methods available. Upload an Excel file with a Methods sheet.</p>';
       sec.appendChild(grid);
       container.appendChild(sec);
     }
 
-    // ========== ADMIN PANEL (FIXED) ==========
+    // ========== ADMIN PANEL ==========
     function renderAdminPanel(container) {
       if (!adminLoggedIn) {
-        // Build login form entirely with createElement
-        const loginCard = document.createElement('div');
-        loginCard.className = 'card p-8 max-w-sm mx-auto mt-12';
-
-        const title = document.createElement('h2');
-        title.className = 'font-display text-2xl font-semibold mb-4 text-center';
-        title.textContent = 'Chef Login';
+        const loginCard = document.createElement('div'); loginCard.className = 'card p-8 max-w-sm mx-auto mt-12';
+        const title = document.createElement('h2'); title.className = 'font-display text-2xl font-semibold mb-4 text-center'; title.textContent = 'Chef Login';
         loginCard.appendChild(title);
-
-        const userInput = document.createElement('input');
-        userInput.type = 'text'; userInput.placeholder = 'Username'; userInput.className = 'w-full border rounded-xl px-4 py-3 mb-4';
-        userInput.value = '';
+        const userInput = document.createElement('input'); userInput.type = 'text'; userInput.placeholder = 'Username'; userInput.className = 'w-full border rounded-xl px-4 py-3 mb-4';
         loginCard.appendChild(userInput);
-
-        const passInput = document.createElement('input');
-        passInput.type = 'password'; passInput.placeholder = 'Password'; passInput.className = 'w-full border rounded-xl px-4 py-3 mb-4';
-        passInput.value = '';
+        const passInput = document.createElement('input'); passInput.type = 'password'; passInput.placeholder = 'Password'; passInput.className = 'w-full border rounded-xl px-4 py-3 mb-4';
         loginCard.appendChild(passInput);
-
-        const loginBtn = document.createElement('button');
-        loginBtn.className = 'w-full py-3 bg-[#C17A5C] text-white rounded-xl font-semibold';
-        loginBtn.textContent = 'Login';
-        loginBtn.onclick = () => {
-          if (userInput.value === 'admin' && passInput.value === 'admin') {
-            adminLoggedIn = true;
-            refreshUI();
-          } else {
-            alert('Invalid credentials');
-          }
-        };
+        const loginBtn = document.createElement('button'); loginBtn.className = 'w-full py-3 bg-[#C17A5C] text-white rounded-xl font-semibold'; loginBtn.textContent = 'Login';
+        loginBtn.onclick = () => { if (userInput.value==='admin' && passInput.value==='admin') { adminLoggedIn=true; refreshUI(); } else alert('Invalid credentials'); };
         loginCard.appendChild(loginBtn);
-
         container.appendChild(loginCard);
         return;
       }
 
-      // Admin dashboard (logged in)
-      const sec = document.createElement('div');
-      sec.className = 'space-y-8';
-
-      const header = document.createElement('div');
-      header.className = 'flex justify-between items-center';
-      header.innerHTML = `<h2 class="font-display text-2xl font-semibold">👑 Chef Dashboard</h2>`;
-      const logoutBtn = document.createElement('button');
-      logoutBtn.className = 'text-sm text-red-500 hover:underline';
-      logoutBtn.textContent = 'Logout';
+      const sec = document.createElement('div'); sec.className = 'space-y-8';
+      const hdr = document.createElement('div'); hdr.className = 'flex justify-between items-center';
+      hdr.innerHTML = '<h2 class="font-display text-2xl font-semibold">👑 Chef Dashboard</h2>';
+      const logoutBtn = document.createElement('button'); logoutBtn.className = 'text-sm text-red-500 hover:underline'; logoutBtn.textContent = 'Logout';
       logoutBtn.onclick = () => { adminLoggedIn = false; refreshUI(); };
-      header.appendChild(logoutBtn);
-      sec.appendChild(header);
+      hdr.appendChild(logoutBtn);
+      sec.appendChild(hdr);
 
-      // Week Overview
-      const overview = document.createElement('div');
-      overview.className = 'card p-5';
-      overview.innerHTML = `<h3 class="font-semibold text-lg mb-4">📋 Weekly Plan Overview</h3>`;
-      const grid = document.createElement('div');
-      grid.className = 'grid grid-cols-1 md:grid-cols-5 gap-4';
+      const overview = document.createElement('div'); overview.className = 'card p-5';
+      overview.innerHTML = '<h3 class="font-semibold text-lg mb-4">📋 Weekly Plan Overview</h3>';
+      const grid = document.createElement('div'); grid.className = 'grid grid-cols-1 md:grid-cols-5 gap-4';
       DAYS.forEach(day => {
         const meal = store.selectedMeals[day];
-        const d = document.createElement('div');
-        d.className = 'border rounded-xl p-3';
+        const d = document.createElement('div'); d.className = 'border rounded-xl p-3';
         d.innerHTML = `<p class="text-xs font-bold uppercase text-gray-500 mb-2">${day}</p>`;
-        if (meal) {
-          d.innerHTML += `
-            <p class="font-semibold">${meal['Meal Name']}</p>
-            <p class="text-xs text-gray-500">${meal.Cuisine} · ${meal.Difficulty}</p>
-            <p class="text-xs">🔥 ${meal['Cal/Serve']} | 💪 ${meal['Protein (g)']}g</p>
-            <p class="text-xs text-red-500">⚠️ ${meal.Allergens || 'None'}</p>
-            <p class="text-xs text-gray-400">❄️ ${meal['Fridge Storage (days)']}d fridge</p>
-            <p class="text-xs italic">💡 ${meal['Meal Prep Notes'] || '-'}</p>`;
-        } else {
-          d.innerHTML += '<p class="text-gray-300 text-sm">Empty</p>';
-        }
+        if (meal) d.innerHTML += `<p class="font-semibold">${meal['Meal Name']}</p><p class="text-xs text-gray-500">${meal.Cuisine} · ${meal.Difficulty}</p><p class="text-xs">🔥${meal['Cal/Serve']} | 💪${meal['Protein (g)']}g</p><p class="text-xs text-red-500">⚠️${meal.Allergens||'None'}</p><p class="text-xs text-gray-400">❄️${meal['Fridge Storage (days)']}d</p><p class="text-xs italic">💡${meal['Meal Prep Notes']||'-'}</p>`;
+        else d.innerHTML += '<p class="text-gray-300 text-sm">Empty</p>';
         grid.appendChild(d);
       });
       overview.appendChild(grid);
       sec.appendChild(overview);
 
-      // Cooking Checklist
-      const checklist = document.createElement('div');
-      checklist.className = 'card p-5';
-      checklist.innerHTML = `<h3 class="font-semibold text-lg mb-4">✅ Chef's Cooking Checklist</h3>`;
-      let hasMeals = false;
+      const checklist = document.createElement('div'); checklist.className = 'card p-5';
+      checklist.innerHTML = '<h3 class="font-semibold text-lg mb-4">✅ Cooking Checklist</h3>';
+      let hm = false;
       DAYS.forEach(day => {
-        const meal = store.selectedMeals[day];
-        if (!meal) return;
-        hasMeals = true;
-        const method = store.methodsMap[meal.ID] || 'No method recorded.';
-        const row = document.createElement('div');
-        row.className = 'py-3 border-b flex items-start gap-3';
-        row.innerHTML = `<input type="checkbox" class="mt-1 h-5 w-5 accent-green-700"><div><p class="font-semibold">${meal['Meal Name']} <span class="text-sm text-gray-500">(${day})</span></p><p class="text-sm text-gray-600 mt-1">${method.substring(0,120)}…</p></div>`;
+        const meal = store.selectedMeals[day]; if (!meal) return;
+        hm = true;
+        const m = store.methodsMap[meal.ID] || 'No method.';
+        const row = document.createElement('div'); row.className = 'py-3 border-b flex items-start gap-3';
+        row.innerHTML = `<input type="checkbox" class="mt-1 h-5 w-5 accent-green-700"><div><p class="font-semibold">${meal['Meal Name']} <span class="text-sm text-gray-500">(${day})</span></p><p class="text-sm text-gray-600 mt-1">${m.substring(0,120)}…</p></div>`;
         checklist.appendChild(row);
       });
-      if (!hasMeals) checklist.innerHTML += '<p class="text-gray-400">No meals selected.</p>';
+      if (!hm) checklist.innerHTML += '<p class="text-gray-400">No meals.</p>';
       sec.appendChild(checklist);
 
-      // Activity Log
-      const logCard = document.createElement('div');
-      logCard.className = 'card p-5';
-      logCard.innerHTML = `<h3 class="font-semibold text-lg mb-4">📜 Plan Change History</h3>`;
-      const log = (() => {
-        try { return JSON.parse(localStorage.getItem('prepify_plan_log') || '[]'); } catch(e) { return []; }
-      })().reverse().slice(0,10);
-      if (!log.length) {
-        logCard.innerHTML += '<p class="text-gray-400">No activity yet.</p>';
-      } else {
-        const table = document.createElement('table');
-        table.className = 'w-full text-sm';
+      const logCard = document.createElement('div'); logCard.className = 'card p-5';
+      logCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">📜 History</h3>';
+      const log = (() => { try { return JSON.parse(localStorage.getItem('prepify_plan_log')||'[]'); } catch(e) { return []; } })().reverse().slice(0,10);
+      if (!log.length) logCard.innerHTML += '<p class="text-gray-400">No activity.</p>';
+      else {
+        const table = document.createElement('table'); table.className = 'w-full text-sm';
         table.innerHTML = `<thead><tr class="text-left text-gray-500">${DAYS.map(d=>`<th>${d.substring(0,3)}</th>`).join('')}</tr></thead><tbody></tbody>`;
         const tbody = table.querySelector('tbody');
         log.forEach(entry => {
           const tr = document.createElement('tr');
           tr.innerHTML = `<td class="py-2 text-xs text-gray-400">${new Date(entry.timestamp).toLocaleDateString()}</td>`;
-          DAYS.forEach(day => {
-            const id = entry.plan[day];
-            const meal = id ? store.meals.find(m => m.ID == id) : null;
-            tr.innerHTML += `<td class="py-2 text-xs">${meal ? meal['Meal Name'].substring(0,12) : (id ? '#'+id : '—')}</td>`;
-          });
+          DAYS.forEach(day => { const id = entry.plan[day]; const ml = id ? store.meals.find(m=>m.ID==id) : null; tr.innerHTML += `<td class="py-2 text-xs">${ml ? ml['Meal Name'].substring(0,12) : (id ? '#'+id : '—')}</td>`; });
           tbody.appendChild(tr);
         });
         logCard.appendChild(table);
       }
       sec.appendChild(logCard);
 
-      // Settings
-      const settings = document.createElement('div');
-      settings.className = 'card p-5';
-      settings.innerHTML = `<h3 class="font-semibold text-lg mb-4">⚙️ Settings & Tools</h3>`;
-      const resetBtn = document.createElement('button');
-      resetBtn.className = 'px-4 py-2 bg-red-500 text-white rounded-xl text-sm mr-3';
-      resetBtn.textContent = 'Reset All App Data';
-      resetBtn.onclick = () => { if (confirm('Clear all local data?')) { localStorage.clear(); location.reload(); } };
+      const settings = document.createElement('div'); settings.className = 'card p-5';
+      settings.innerHTML = '<h3 class="font-semibold text-lg mb-4">⚙️ Settings</h3>';
+      const resetBtn = document.createElement('button'); resetBtn.className = 'px-4 py-2 bg-red-500 text-white rounded-xl text-sm mr-3'; resetBtn.textContent = 'Reset All Data';
+      resetBtn.onclick = () => { if (confirm('Clear all?')) { localStorage.clear(); location.reload(); } };
       settings.appendChild(resetBtn);
-      const downloadBtn = document.createElement('button');
-      downloadBtn.className = 'px-4 py-2 bg-gray-800 text-white rounded-xl text-sm';
-      downloadBtn.textContent = 'Download Plan JSON';
-      downloadBtn.onclick = () => {
+      const dlBtn = document.createElement('button'); dlBtn.className = 'px-4 py-2 bg-gray-800 text-white rounded-xl text-sm'; dlBtn.textContent = 'Download Plan JSON';
+      dlBtn.onclick = () => {
         const data = { plan: {}, lastModified: Date.now() };
         DAYS.forEach(d => { if (store.selectedMeals[d]) data.plan[d] = store.selectedMeals[d].ID; });
-        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+        const blob = new Blob([JSON.stringify(data)],{type:'application/json'});
         const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'prepify-plan.json'; a.click();
       };
-      settings.appendChild(downloadBtn);
+      settings.appendChild(dlBtn);
       sec.appendChild(settings);
-
       container.appendChild(sec);
     }
 
-    // ========== INIT ==========
     window.addEventListener('DOMContentLoaded', async () => {
       loadLocalData();
       if (store.meals.length > 0) await pullFromServer();
       store.emit();
       refreshUI();
       setInterval(pullFromServer, 30000);
-      document.addEventListener('dragover', e => e.preventDefault());
-      document.addEventListener('drop', e => {
-        e.preventDefault();
-        const file = e.dataTransfer.files[0];
-        if (file && file.name.endsWith('.xlsx')) {
-          const input = document.querySelector('input[type="file"]');
-          if (input) { const dt = new DataTransfer(); dt.items.add(file); input.files = dt.files; input.dispatchEvent(new Event('change')); }
-        }
-      });
     });
   </script>
 </body>
