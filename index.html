@@ -111,8 +111,16 @@
             (meal.Vegetables||'').split(',').forEach(v => v && items.push({ name: v.trim(), quantity: 50*serv, unit: 'g', mealRef: meal['Meal Name'], category: 'Produce' }));
           }
         });
+        // 🆕 FILTER OUT PANTRY ITEMS THAT ARE STOCKED
+        const pantry = JSON.parse(localStorage.getItem('prepify_pantry') || '[]');
+        const stockedItems = new Set(pantry.filter(i => i.stocked).map(i => i.name.toLowerCase()));
+        const filteredItems = items.filter(item => {
+          const cat = categorizeIngredient(item.name);
+          if (cat === 'Produce' || cat === 'Protein' || cat === 'Grains & Pasta') return true;
+          return !stockedItems.has(item.name.toLowerCase());
+        });
         const merged = {};
-        items.forEach(i => {
+        filteredItems.forEach(i => {
           const key = i.name.toLowerCase().replace(/[^a-z0-9]/g,'_');
           if (merged[key]) { merged[key].quantity += i.quantity; if (!merged[key].mealRefs.includes(i.mealRef)) merged[key].mealRefs.push(i.mealRef); }
           else merged[key] = { ...i, key, mealRefs: [i.mealRef], quantity: i.quantity };
@@ -583,7 +591,7 @@
           <div class="flex gap-2">${list.length ? `<button id="copyBtn" class="px-3 py-1.5 border rounded-xl text-sm">📋 Copy</button><button id="pdfBtn" class="px-3 py-1.5 bg-gray-800 text-white rounded-xl text-sm">PDF</button>` : ''}</div>
         </div>`;
       const content = document.createElement('div'); content.className = 'card p-5';
-      if (!list.length) content.innerHTML = '<p class="text-gray-400 text-center py-12">Select meals first.</p>';
+      if (!list.length) content.innerHTML = '<p class="text-gray-400 text-center py-12">Select meals first. Pantry items are automatically hidden.</p>';
       else {
         const grouped = {}; list.forEach(i => { if (!grouped[i.category]) grouped[i.category] = []; grouped[i.category].push(i); });
         Object.entries(grouped).forEach(([cat, items]) => {
@@ -638,7 +646,7 @@
       container.appendChild(sec);
     }
 
-// ========== ADMIN TAB (CHEF'S COMMAND CENTER) ==========
+    // ========== ADMIN TAB (CHEF'S COMMAND CENTER) ==========
     function renderAdminPanel(container) {
       if (!adminLoggedIn) {
         const loginCard = document.createElement('div'); loginCard.className = 'card p-8 max-w-sm mx-auto mt-12';
@@ -656,8 +664,6 @@
       }
 
       const sec = document.createElement('div'); sec.className = 'space-y-6';
-
-      // Header
       const hdr = document.createElement('div'); hdr.className = 'flex justify-between items-center';
       hdr.innerHTML = '<h2 class="font-display text-2xl font-semibold">👑 Chef\'s Command Center</h2>';
       const logoutBtn = document.createElement('button'); logoutBtn.className = 'text-sm text-red-500 hover:underline'; logoutBtn.textContent = 'Logout';
@@ -714,18 +720,16 @@
         </div>`;
       sec.appendChild(summaryCard);
 
-      // ===== 2. BATCHED PREP LIST (THE KEY FEATURE) =====
+      // ===== 2. BATCHED PREP LIST =====
       const prepCard = document.createElement('div'); prepCard.className = 'card p-5';
       prepCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">🔪 Batched Prep List <span class="text-xs text-gray-400 font-normal">(grouped by ingredient)</span></h3>';
 
-      // Collect all ingredients across all selected meals
       const allIngredients = [];
       selectedMeals.forEach(meal => {
         const ingData = store.ingredientsMap[meal.ID];
         if (ingData && ingData.length) {
           ingData.forEach(i => allIngredients.push({ ...i, mealName: meal['Meal Name'], day: DAYS.find(d => store.selectedMeals[d]?.ID === meal.ID) }));
         } else {
-          // Fallback: parse from meal fields
           const serv = meal.Servings || 4;
           (meal['Carb Source']||'').split(',').forEach(c => c && allIngredients.push({ name: c.trim(), quantity: 80*serv, unit: 'g', mealName: meal['Meal Name'] }));
           (meal['Protein Source']||'').split(',').forEach(p => p && allIngredients.push({ name: p.trim(), quantity: 150*serv, unit: 'g', mealName: meal['Meal Name'] }));
@@ -733,7 +737,6 @@
         }
       });
 
-      // Batch ingredients by normalized name
       const batched = {};
       allIngredients.forEach(ing => {
         const key = ing.name.toLowerCase().replace(/[^a-z0-9]/g,'_');
@@ -744,7 +747,6 @@
         }
       });
 
-      // Sort by category (produce first, then protein, then pantry)
       const prepOrder = ['Produce', 'Protein', 'Plant-Based Protein', 'Dairy & Eggs', 'Grains & Pasta', 'Pantry Staples', 'Other'];
       const sortedBatched = Object.values(batched).sort((a, b) => {
         const catA = categorizeIngredient(a.name);
@@ -770,7 +772,7 @@
       }
       sec.appendChild(prepCard);
 
-      // ===== 3. DAY-BY-DAY COOKING SCHEDULE =====
+      // ===== 3. COOKING SCHEDULE =====
       const scheduleCard = document.createElement('div'); scheduleCard.className = 'card p-5';
       scheduleCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">📅 Cooking Schedule</h3>';
       DAYS.forEach(day => {
@@ -828,7 +830,97 @@
         sec.appendChild(allergenCard);
       }
 
-      // ===== 6. QUICK ACTIONS =====
+      // ===== 6. PANTRY TRACKER =====
+      const pantryCard = document.createElement('div');
+      pantryCard.className = 'card p-5';
+      pantryCard.innerHTML = `
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="font-semibold text-lg">🧂 Pantry Inventory</h3>
+          <button id="addPantryBtn" class="text-sm bg-blue-500 text-white px-3 py-1.5 rounded-xl">+ Add Item</button>
+        </div>
+        <p class="text-xs text-gray-400 mb-3">Stocked items won't appear in your shopping list. Uncheck when you run out.</p>`;
+
+      if (!localStorage.getItem('prepify_pantry')) {
+        localStorage.setItem('prepify_pantry', JSON.stringify([
+          { name: 'Olive Oil', stocked: true, lastChecked: Date.now() },
+          { name: 'Salt', stocked: true, lastChecked: Date.now() },
+          { name: 'Black Pepper', stocked: true, lastChecked: Date.now() },
+          { name: 'Garlic', stocked: true, lastChecked: Date.now() },
+          { name: 'Soy Sauce', stocked: true, lastChecked: Date.now() },
+        ]));
+      }
+
+      let pantry = JSON.parse(localStorage.getItem('prepify_pantry') || '[]');
+
+      const renderPantry = () => {
+        const existingList = pantryCard.querySelector('#pantryList');
+        if (existingList) existingList.remove();
+
+        const list = document.createElement('div');
+        list.id = 'pantryList';
+        list.className = 'space-y-2 max-h-64 overflow-y-auto';
+
+        pantry.sort((a, b) => {
+          if (a.stocked === b.stocked) return a.name.localeCompare(b.name);
+          return a.stocked ? 1 : -1;
+        });
+
+        pantry.forEach((item, index) => {
+          const row = document.createElement('div');
+          row.className = `flex items-center gap-3 py-2 px-3 rounded-xl ${item.stocked ? 'bg-green-50' : 'bg-red-50'}`;
+          row.innerHTML = `
+            <input type="checkbox" class="h-5 w-5 accent-green-700 pantry-check" ${item.stocked ? 'checked' : ''}>
+            <span class="flex-1 text-sm font-medium ${item.stocked ? 'text-green-800' : 'text-red-800'}">${item.name}</span>
+            <span class="text-xs text-gray-400">${item.stocked ? '✅ Stocked' : '❌ Empty'}</span>
+            <button class="text-xs text-red-400 hover:text-red-600">🗑</button>`;
+
+          row.querySelector('.pantry-check').addEventListener('change', (e) => {
+            pantry[index].stocked = e.target.checked;
+            pantry[index].lastChecked = Date.now();
+            localStorage.setItem('prepify_pantry', JSON.stringify(pantry));
+            renderPantry();
+            if (store.activeTab === 'shopping') refreshUI();
+          });
+
+          row.querySelector('button').addEventListener('click', () => {
+            if (confirm(`Remove ${item.name} from pantry?`)) {
+              pantry.splice(index, 1);
+              localStorage.setItem('prepify_pantry', JSON.stringify(pantry));
+              renderPantry();
+              if (store.activeTab === 'shopping') refreshUI();
+            }
+          });
+
+          list.appendChild(row);
+        });
+
+        pantryCard.appendChild(list);
+
+        const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+        const needsCheck = pantry.filter(i => i.stocked && i.lastChecked < thirtyDaysAgo);
+        if (needsCheck.length > 0) {
+          const reminder = document.createElement('div');
+          reminder.className = 'mt-3 p-3 bg-yellow-50 rounded-xl text-sm text-yellow-800';
+          reminder.innerHTML = `⚠️ <strong>Reminder:</strong> ${needsCheck.length} item${needsCheck.length > 1 ? 's' : ''} haven't been checked in 30 days: ${needsCheck.map(i => i.name).join(', ')}`;
+          pantryCard.appendChild(reminder);
+        }
+      };
+
+      renderPantry();
+
+      pantryCard.querySelector('#addPantryBtn').addEventListener('click', () => {
+        const name = prompt('Enter pantry item name:');
+        if (name && name.trim()) {
+          pantry.push({ name: name.trim(), stocked: true, lastChecked: Date.now() });
+          localStorage.setItem('prepify_pantry', JSON.stringify(pantry));
+          renderPantry();
+          if (store.activeTab === 'shopping') refreshUI();
+        }
+      });
+
+      sec.appendChild(pantryCard);
+
+      // ===== 7. QUICK ACTIONS =====
       const actionsCard = document.createElement('div'); actionsCard.className = 'card p-5';
       actionsCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">⚙️ Quick Actions</h3>';
       const printBtn = document.createElement('button'); printBtn.className = 'px-4 py-2 bg-gray-800 text-white rounded-xl text-sm mr-3'; printBtn.textContent = '🖨 Print Prep List';
@@ -845,7 +937,7 @@
       actionsCard.appendChild(copyBtn);
       sec.appendChild(actionsCard);
 
-      // ===== 7. PLAN CHANGE HISTORY (compact) =====
+      // ===== 8. PLAN CHANGE HISTORY =====
       const logCard = document.createElement('div'); logCard.className = 'card p-5';
       logCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">📜 Recent Changes</h3>';
       const log = (() => { try { return JSON.parse(localStorage.getItem('prepify_plan_log')||'[]'); } catch(e) { return []; } })().reverse().slice(0,5);
