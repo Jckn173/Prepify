@@ -33,7 +33,7 @@
   <div id="app"></div>
 
   <script>
-    // ⚙️ SET YOUR BACKEND URL HERE
+    // ⚙️ SET YOUR BACKEND URL
     const API_BASE = 'https://prepify-backend-pmbg.onrender.com';
 
     const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
@@ -122,6 +122,22 @@
       try { await fetch(`${API_BASE}/api/plan`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ plan: payload, lastModified: Date.now() }) }); } catch(e) {}
     }
 
+    async function pushDatabaseToServer() {
+      if (!store.meals.length) return;
+      try {
+        await fetch(`${API_BASE}/api/database`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            meals: store.meals,
+            ingredients: store.ingredientsMap,
+            methods: store.methodsMap,
+            lastModified: Date.now()
+          })
+        });
+      } catch(e) {}
+    }
+
     async function pullFromServer() {
       if (!store.meals.length) return;
       try {
@@ -133,6 +149,18 @@
           DAYS.forEach(day => { const meal = store.meals.find(m => m.ID == data.plan[day]); if (meal) newPlan[day] = meal; });
           store.selectedMeals = newPlan;
           store.emit();
+        }
+      } catch(e) {}
+    }
+
+    async function pullDatabaseFromServer() {
+      try {
+        const res = await fetch(`${API_BASE}/api/database`);
+        const db = await res.json();
+        if (db && db.meals && db.meals.length) {
+          store.setMeals(db.meals);
+          store.setIngredientsMap(db.ingredients || {});
+          store.setMethodsMap(db.methods || {});
         }
       } catch(e) {}
     }
@@ -175,7 +203,7 @@
       }
     }
 
-    // ========== EXCEL PARSING (unchanged) ==========
+    // ========== EXCEL PARSING ==========
     function parseWorkbook(wb) {
       const sheet = wb.SheetNames.find(n => n.toLowerCase().includes('meal')) || wb.SheetNames[0];
       const meals = XLSX.utils.sheet_to_json(wb.Sheets[sheet]).map(r => ({
@@ -208,29 +236,25 @@
         });
         store.setMethodsMap(methMap);
       }
+
+      pushDatabaseToServer();
     }
 
-    // ========== FILE UPLOAD HANDLER ==========
+    // ========== FILE UPLOAD ==========
     window.handleFileUpload = function(e) {
       const file = e.target.files[0];
       if (!file) return;
-      console.log('File selected:', file.name);
       const reader = new FileReader();
       reader.onload = function(ev) {
         try {
           const wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array' });
-          console.log('Sheets found:', wb.SheetNames);
           parseWorkbook(wb);
           store.clearWeek();
-          console.log('Meals loaded:', store.meals.length);
           refreshUI();
-        } catch (err) {
-          alert('Parse error: ' + err.message);
-          console.error(err);
-        }
+        } catch (err) { alert('Parse error: ' + err.message); }
       };
       reader.readAsArrayBuffer(file);
-      e.target.value = ''; // allow re-upload of same file
+      e.target.value = '';
     };
 
     // ========== MODALS ==========
@@ -275,14 +299,14 @@
       document.body.appendChild(overlay);
     }
 
-    // ========== RENDER ENGINE ==========
+    // ========== RENDER ==========
     function refreshUI() { renderApp(); }
 
     function renderApp() {
       const app = document.getElementById('app'); app.innerHTML = '';
       const container = document.createElement('div'); container.className = 'max-w-6xl mx-auto px-4 py-6';
 
-      // HEADER with fixed file upload (using label + hidden input)
+      // Header with fixed upload
       const header = document.createElement('header');
       header.className = 'flex flex-wrap items-center justify-between gap-3 mb-6';
       header.innerHTML = `
@@ -290,59 +314,44 @@
           <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#C17A5C] to-[#E8A849] flex items-center justify-center text-white font-bold text-lg">P</div>
           <div><h1 class="font-display text-2xl font-bold">Prepify</h1><p class="text-xs text-gray-500 uppercase tracking-wider">Synced Meal Prep</p></div>
         </div>`;
-
-      // Hidden file input + styled label (guaranteed to work)
       const fileInput = document.createElement('input');
-      fileInput.type = 'file';
-      fileInput.accept = '.xlsx,.xls';
-      fileInput.id = 'fileInputVisible';
-      fileInput.style.display = 'none';
+      fileInput.type = 'file'; fileInput.accept = '.xlsx,.xls'; fileInput.id = 'fileInputVisible'; fileInput.style.display = 'none';
       fileInput.addEventListener('change', window.handleFileUpload);
-
       const uploadLabel = document.createElement('label');
       uploadLabel.setAttribute('for', 'fileInputVisible');
       uploadLabel.className = 'px-4 py-2.5 rounded-xl border border-dashed border-gray-300 bg-white/80 hover:bg-orange-50 text-sm font-medium cursor-pointer';
       uploadLabel.textContent = '📤 Upload Excel';
-
       header.appendChild(fileInput);
       header.appendChild(uploadLabel);
       container.appendChild(header);
 
-      // Empty state: no meals loaded
       if (!store.meals.length) {
-        const empty = document.createElement('div');
-        empty.className = 'text-center py-20';
-        empty.innerHTML = `<h2 class="font-display text-2xl font-semibold mb-2">No meal database loaded</h2><p class="text-gray-500">Click "Upload Excel" to begin.</p>`;
+        const empty = document.createElement('div'); empty.className = 'text-center py-20';
+        empty.innerHTML = `<h2 class="font-display text-2xl font-semibold mb-2">No meal database loaded</h2><p class="text-gray-500">Upload your Excel, or wait – it may sync from another device.</p>`;
         container.appendChild(empty);
         app.appendChild(container);
         return;
       }
 
       // Tabs
-      const tabs = document.createElement('div');
-      tabs.className = 'flex gap-2 bg-gray-100/80 p-1.5 rounded-2xl w-fit mb-6';
+      const tabs = document.createElement('div'); tabs.className = 'flex gap-2 bg-gray-100/80 p-1.5 rounded-2xl w-fit mb-6';
       ['planner','shopping','methods','admin'].forEach(t => {
-        const btn = document.createElement('button');
-        btn.className = `tab-btn ${store.activeTab === t ? 'active' : ''}`;
+        const btn = document.createElement('button'); btn.className = `tab-btn ${store.activeTab === t ? 'active' : ''}`;
         btn.textContent = t === 'planner' ? '📅 Planner' : t === 'shopping' ? '🛒 Shopping' : t === 'methods' ? '👨‍🍳 Methods' : '🔧 Admin';
         btn.onclick = () => { store.setActiveTab(t); refreshUI(); };
         tabs.appendChild(btn);
       });
       container.appendChild(tabs);
 
-      // Render active tab
-      try {
-        if (store.activeTab === 'planner') renderPlanner(container);
-        else if (store.activeTab === 'shopping') renderShopping(container);
-        else if (store.activeTab === 'methods') renderMethods(container);
-        else if (store.activeTab === 'admin') renderAdminPanel(container);
-      } catch(e) {
-        container.innerHTML += `<div class="text-red-500 p-4">Error rendering tab: ${e.message}</div>`;
-      }
+      if (store.activeTab === 'planner') renderPlanner(container);
+      else if (store.activeTab === 'shopping') renderShopping(container);
+      else if (store.activeTab === 'methods') renderMethods(container);
+      else if (store.activeTab === 'admin') renderAdminPanel(container);
 
       app.appendChild(container);
     }
 
+    // ========== PLANNER TAB ==========
     function renderPlanner(container) {
       const sec = document.createElement('div');
       sec.innerHTML = `
@@ -432,6 +441,7 @@
       document.getElementById('searchInput')?.addEventListener('input', (e) => { store.setFilters({ search: e.target.value }); refreshUI(); });
     }
 
+    // ========== SHOPPING TAB ==========
     function renderShopping(container) {
       const list = store.getShoppingList();
       const sec = document.createElement('div');
@@ -477,6 +487,7 @@
       });
     }
 
+    // ========== METHODS TAB ==========
     function renderMethods(container) {
       const sec = document.createElement('div');
       sec.innerHTML = `<h2 class="font-display text-2xl font-semibold mb-4">👨‍🍳 Cooking Methods</h2>`;
@@ -495,7 +506,7 @@
       container.appendChild(sec);
     }
 
-    // ========== ADMIN PANEL ==========
+    // ========== ADMIN TAB ==========
     function renderAdminPanel(container) {
       if (!adminLoggedIn) {
         const loginCard = document.createElement('div'); loginCard.className = 'card p-8 max-w-sm mx-auto mt-12';
@@ -598,7 +609,12 @@
     // ========== INIT ==========
     window.addEventListener('DOMContentLoaded', async () => {
       loadLocalData();
-      if (store.meals.length > 0) await pullFromServer();
+      if (!store.meals.length) {
+        await pullDatabaseFromServer();
+      }
+      if (store.meals.length) {
+        await pullFromServer();
+      }
       store.emit();
       refreshUI();
       setInterval(pullFromServer, 30000);
