@@ -155,14 +155,23 @@
 
     async function pullDatabaseFromServer() {
       try {
-        const res = await fetch(`${API_BASE}/api/database`);
+        const res = await fetch(`${API_BASE}/api/database?_=${Date.now()}`);
+        if (!res.ok) throw new Error(`Server error: ${res.status}`);
         const db = await res.json();
         if (db && db.meals && db.meals.length) {
           store.setMeals(db.meals);
           store.setIngredientsMap(db.ingredients || {});
           store.setMethodsMap(db.methods || {});
+          return true;
+        } else {
+          console.warn('Database pull returned empty meals');
+          return false;
         }
-      } catch(e) {}
+      } catch(e) {
+        console.error('Database pull failed:', e);
+        alert('Could not load meal database from server. Check your connection and backend.');
+        return false;
+      }
     }
 
     // ========== LOCAL STORAGE ==========
@@ -299,14 +308,14 @@
       document.body.appendChild(overlay);
     }
 
-    // ========== RENDER ==========
+    // ========== RENDER ENGINE ==========
     function refreshUI() { renderApp(); }
 
     function renderApp() {
       const app = document.getElementById('app'); app.innerHTML = '';
       const container = document.createElement('div'); container.className = 'max-w-6xl mx-auto px-4 py-6';
 
-      // Header with fixed upload
+      // Header with upload and sync
       const header = document.createElement('header');
       header.className = 'flex flex-wrap items-center justify-between gap-3 mb-6';
       header.innerHTML = `
@@ -323,7 +332,8 @@
       uploadLabel.textContent = '📤 Upload Excel';
       header.appendChild(fileInput);
       header.appendChild(uploadLabel);
-            // Force Sync button
+
+      // Force Sync button
       const syncBtn = document.createElement('button');
       syncBtn.className = 'px-4 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 transition ml-2';
       syncBtn.textContent = '🔄 Sync';
@@ -331,23 +341,26 @@
       syncBtn.onclick = async function() {
         syncBtn.textContent = '⏳ Syncing...';
         syncBtn.disabled = true;
-        await pullDatabaseFromServer();
-        await pullFromServer();
-        refreshUI();
-        setTimeout(() => {
+        const dbOk = await pullDatabaseFromServer();
+        if (dbOk) {
+          await pullFromServer();
+          refreshUI();
           syncBtn.textContent = '✅ Synced';
-          setTimeout(() => {
-            syncBtn.textContent = '🔄 Sync';
-            syncBtn.disabled = false;
-          }, 1500);
-        }, 500);
+        } else {
+          syncBtn.textContent = '❌ Failed';
+        }
+        setTimeout(() => {
+          syncBtn.textContent = '🔄 Sync';
+          syncBtn.disabled = false;
+        }, 2000);
       };
       header.appendChild(syncBtn);
       container.appendChild(header);
 
+      // Empty state
       if (!store.meals.length) {
         const empty = document.createElement('div'); empty.className = 'text-center py-20';
-        empty.innerHTML = `<h2 class="font-display text-2xl font-semibold mb-2">No meal database loaded</h2><p class="text-gray-500">Upload your Excel, or wait – it may sync from another device.</p>`;
+        empty.innerHTML = `<h2 class="font-display text-2xl font-semibold mb-2">No meal database loaded</h2><p class="text-gray-500">Upload your Excel, or tap <strong>🔄 Sync</strong> to pull the database from the server.</p>`;
         container.appendChild(empty);
         app.appendChild(container);
         return;
