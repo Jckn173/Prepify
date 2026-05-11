@@ -34,7 +34,6 @@
     .modal-overlay { position: fixed; inset: 0; background: rgba(40,36,31,0.4); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 1rem; }
     .modal-content { background: white; border-radius: 24px; max-width: 560px; width: 100%; max-height: 85vh; overflow-y: auto; }
 
-    /* Mobile optimisation */
     @media (max-width: 768px) {
       .card { padding: 0.75rem; }
       .tab-btn { padding: 0.4rem 0.9rem; font-size: 0.8rem; }
@@ -411,14 +410,16 @@
         <div class="flex justify-between items-center mb-4">
           <h2 class="font-display text-2xl font-semibold">5-Day Planner</h2>
           <div class="flex gap-2">
-            <button id="autoBtn" class="px-4 py-2 bg-[#C17A5C] text-white rounded-xl text-sm font-semibold">✨ Auto-fill</button>
+            <button id="autoBtn" class="px-4 py-2 bg-[#C17A5C] text-white rounded-xl text-sm font-semibold">✨ Auto‑fill</button>
             <button id="clearBtn" class="px-4 py-2 border border-gray-200 rounded-xl text-sm">Clear</button>
           </div>
         </div>`;
-      const grid = document.createElement('div'); grid.className = 'grid grid-cols-2 md:grid-cols-5 gap-4 mb-8';
+      const grid = document.createElement('div');
+      grid.className = 'grid grid-cols-2 md:grid-cols-5 gap-4 mb-8';
       DAYS.forEach(day => {
         const meal = store.selectedMeals[day];
-        const card = document.createElement('div'); card.className = 'card p-4 cursor-pointer';
+        const card = document.createElement('div');
+        card.className = 'card p-4 cursor-pointer';
         card.innerHTML = `<span class="text-xs font-bold uppercase text-gray-400">${day}</span>`;
         if (meal) {
           card.innerHTML += `
@@ -442,55 +443,134 @@
       sec.querySelector('#clearBtn').onclick = () => { store.clearWeek(); refreshUI(); };
 
       const browser = document.createElement('div');
-      browser.innerHTML = `
-        <div class="flex justify-between items-center mb-3">
-          <h3 class="font-display text-xl font-semibold">Browse Meals</h3>
-          <button id="filterToggle" class="text-sm border border-gray-200 px-4 py-2 rounded-xl">🔽 Filters</button>
-        </div>
-        <div id="filterPanel" class="card p-4 mb-4 hidden"></div>
-        <div id="mealGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-96 overflow-y-auto"></div>`;
+      const filterPanel = document.createElement('div');
+      filterPanel.id = 'filterPanel';
+      filterPanel.className = 'card p-4 mb-4 hidden';
+
+      const categories = ['All Categories', ...new Set(store.meals.map(m => m.Category))];
+      const cuisines = ['All Cuisines', ...new Set(store.meals.map(m => m.Cuisine))];
+      const difficulties = ['Any Difficulty', 'Easy', 'Medium'];
+      const proteins = ['All Proteins', ...new Set(store.meals.flatMap(m => (m['Protein Source']||'').split(',').map(s => s.trim()).filter(Boolean)))];
+
+      const catSelect = document.createElement('select');
+      catSelect.className = 'border rounded-xl px-3 py-2 text-sm bg-white';
+      catSelect.id = 'catFilter';
+      categories.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c === 'All Categories' ? '' : c;
+        opt.textContent = c;
+        catSelect.appendChild(opt);
+      });
+
+      const cuiSelect = document.createElement('select');
+      cuiSelect.className = 'border rounded-xl px-3 py-2 text-sm bg-white';
+      cuiSelect.id = 'cuisineFilter';
+      cuisines.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c === 'All Cuisines' ? '' : c;
+        opt.textContent = c;
+        cuiSelect.appendChild(opt);
+      });
+
+      const diffSelect = document.createElement('select');
+      diffSelect.className = 'border rounded-xl px-3 py-2 text-sm bg-white';
+      diffSelect.id = 'diffFilter';
+      difficulties.forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d === 'Any Difficulty' ? '' : d;
+        opt.textContent = d;
+        diffSelect.appendChild(opt);
+      });
+
+      const protSelect = document.createElement('select');
+      protSelect.className = 'border rounded-xl px-3 py-2 text-sm bg-white';
+      protSelect.id = 'protFilter';
+      proteins.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p === 'All Proteins' ? '' : p;
+        opt.textContent = p;
+        protSelect.appendChild(opt);
+      });
+
+      const searchInput = document.createElement('input');
+      searchInput.type = 'text';
+      searchInput.placeholder = 'Search meals...';
+      searchInput.className = 'border rounded-xl px-3 py-2 text-sm';
+      searchInput.id = 'searchInput';
+
+      const filterGrid = document.createElement('div');
+      filterGrid.className = 'grid grid-cols-2 md:grid-cols-5 gap-3';
+      filterGrid.appendChild(catSelect);
+      filterGrid.appendChild(cuiSelect);
+      filterGrid.appendChild(diffSelect);
+      filterGrid.appendChild(protSelect);
+      filterGrid.appendChild(searchInput);
+      filterPanel.appendChild(filterGrid);
+      browser.appendChild(filterPanel);
+
+      const filterHeader = document.createElement('div');
+      filterHeader.className = 'flex justify-between items-center mb-3';
+      const filterHeading = document.createElement('h3');
+      filterHeading.className = 'font-display text-xl font-semibold';
+      filterHeading.textContent = 'Browse Meals';
+      const filterToggleBtn = document.createElement('button');
+      filterToggleBtn.className = 'text-sm border border-gray-200 px-4 py-2 rounded-xl hover:bg-gray-50 transition';
+      filterToggleBtn.textContent = '🔽 Filters';
+      filterToggleBtn.id = 'filterToggle';
+      filterToggleBtn.addEventListener('click', () => {
+        filterPanel.classList.toggle('hidden');
+      });
+      filterHeader.appendChild(filterHeading);
+      filterHeader.appendChild(filterToggleBtn);
+      browser.appendChild(filterHeader);
+
+      const mealGrid = document.createElement('div');
+      mealGrid.id = 'mealGrid';
+      mealGrid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-96 overflow-y-auto pr-1';
+      browser.appendChild(mealGrid);
       sec.appendChild(browser);
-
-      const filterPanel = browser.querySelector('#filterPanel');
-      filterPanel.innerHTML = `
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <select id="catFilter" class="border rounded-xl px-3 py-2 text-sm">
-            <option value="">All Categories</option><option>Pasta</option><option>Rice Bowl</option><option>Noodles</option><option>Wrap</option>
-          </select>
-          <select id="cuisineFilter" class="border rounded-xl px-3 py-2 text-sm">
-            <option value="">All Cuisines</option><option>Italian</option><option>Japanese</option><option>Thai</option><option>Mexican</option><option>Mediterranean</option><option>Indian</option><option>Asian Fusion</option><option>Korean</option>
-          </select>
-          <select id="diffFilter" class="border rounded-xl px-3 py-2 text-sm">
-            <option value="">Any Difficulty</option><option>Easy</option><option>Medium</option>
-          </select>
-          <input id="searchInput" placeholder="Search..." class="border rounded-xl px-3 py-2 text-sm">
-        </div>`;
-      const mealGrid = browser.querySelector('#mealGrid');
-      const filtered = store.getFilteredMeals();
-      mealGrid.innerHTML = filtered.length ? '' : '<p class="col-span-full text-center text-gray-400 py-10">No meals match.</p>';
-      filtered.forEach(meal => {
-        const card = document.createElement('div'); card.className = 'card p-3 flex flex-col gap-1 cursor-pointer';
-        card.innerHTML = `
-          <div class="flex justify-between">
-            <h4 class="font-semibold text-sm">${meal['Meal Name']}</h4>
-            <span class="badge badge-${meal.Category.toLowerCase().replace(' ','-')}">${meal.Category}</span>
-          </div>
-          <div class="text-xs text-gray-500">${meal.Cuisine} · ${meal.Difficulty} · ${meal['Cal/Serve']} cal</div>
-          <button class="mt-2 text-xs bg-green-700 text-white px-3 py-1.5 rounded-lg add-btn">+ Add</button>`;
-        card.querySelector('.add-btn').onclick = (e) => { e.stopPropagation(); openDayPicker(meal); };
-        card.onclick = () => openMealDetail(meal);
-        mealGrid.appendChild(card);
-      });
-
       container.appendChild(sec);
-      document.getElementById('filterToggle')?.addEventListener('click', () => filterPanel.classList.toggle('hidden'));
-      ['catFilter','cuisineFilter','diffFilter'].forEach(id => {
-        document.getElementById(id)?.addEventListener('change', (e) => {
-          store.setFilters({ [id==='catFilter'?'category':id==='cuisineFilter'?'cuisine':'difficulty']: e.target.value });
-          refreshUI();
+
+      const updateMealGrid = () => {
+        const filtered = store.getFilteredMeals();
+        const protVal = protSelect.value;
+        const finalMeals = protVal ? filtered.filter(m => (m['Protein Source']||'').toLowerCase().includes(protVal.toLowerCase())) : filtered;
+        mealGrid.innerHTML = finalMeals.length ? '' : '<p class="col-span-full text-center text-gray-400 py-10">No meals match.</p>';
+        finalMeals.forEach(meal => {
+          const card = document.createElement('div');
+          card.className = 'card p-3 flex flex-col gap-1 cursor-pointer';
+          card.innerHTML = `
+            <div class="flex justify-between">
+              <h4 class="font-semibold text-sm">${meal['Meal Name']}</h4>
+              <span class="badge badge-${meal.Category.toLowerCase().replace(' ','-')}">${meal.Category}</span>
+            </div>
+            <div class="text-xs text-gray-500">${meal.Cuisine} · ${meal.Difficulty} · ${meal['Cal/Serve']} cal</div>
+            <button class="mt-2 text-xs bg-green-700 text-white px-3 py-1.5 rounded-lg add-btn">+ Add</button>`;
+          card.querySelector('.add-btn').onclick = (e) => { e.stopPropagation(); openDayPicker(meal); };
+          card.onclick = () => openMealDetail(meal);
+          mealGrid.appendChild(card);
         });
+      };
+
+      updateMealGrid();
+
+      const applyFilters = () => {
+        store.setFilters({
+          category: catSelect.value,
+          cuisine: cuiSelect.value,
+          difficulty: diffSelect.value
+        });
+        updateMealGrid();
+      };
+
+      catSelect.addEventListener('change', applyFilters);
+      cuiSelect.addEventListener('change', applyFilters);
+      diffSelect.addEventListener('change', applyFilters);
+      protSelect.addEventListener('change', updateMealGrid);
+      searchInput.addEventListener('input', (e) => {
+        store.setFilters({ search: e.target.value });
+        updateMealGrid();
       });
-      document.getElementById('searchInput')?.addEventListener('input', (e) => { store.setFilters({ search: e.target.value }); refreshUI(); });
     }
 
     // ========== SHOPPING TAB ==========
@@ -671,7 +751,6 @@
       refreshUI();
       setInterval(pullFromServer, 30000);
 
-      // Register service worker for offline support
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js');
       }
