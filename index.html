@@ -638,7 +638,7 @@
       container.appendChild(sec);
     }
 
-    // ========== ADMIN TAB ==========
+// ========== ADMIN TAB (CHEF'S COMMAND CENTER) ==========
     function renderAdminPanel(container) {
       if (!adminLoggedIn) {
         const loginCard = document.createElement('div'); loginCard.className = 'card p-8 max-w-sm mx-auto mt-12';
@@ -655,85 +655,209 @@
         return;
       }
 
-      const sec = document.createElement('div'); sec.className = 'space-y-8';
+      const sec = document.createElement('div'); sec.className = 'space-y-6';
+
+      // Header
       const hdr = document.createElement('div'); hdr.className = 'flex justify-between items-center';
-      hdr.innerHTML = '<h2 class="font-display text-2xl font-semibold">👑 Chef Dashboard</h2>';
+      hdr.innerHTML = '<h2 class="font-display text-2xl font-semibold">👑 Chef\'s Command Center</h2>';
       const logoutBtn = document.createElement('button'); logoutBtn.className = 'text-sm text-red-500 hover:underline'; logoutBtn.textContent = 'Logout';
       logoutBtn.onclick = () => { adminLoggedIn = false; refreshUI(); };
       hdr.appendChild(logoutBtn);
       sec.appendChild(hdr);
 
-      const overview = document.createElement('div'); overview.className = 'card p-5';
-      overview.innerHTML = '<h3 class="font-semibold text-lg mb-4">📋 Weekly Plan Overview</h3>';
-      const grid = document.createElement('div'); grid.className = 'grid grid-cols-1 md:grid-cols-5 gap-4';
+      const selectedMeals = DAYS.map(d => store.selectedMeals[d]).filter(Boolean);
+
+      if (!selectedMeals.length) {
+        const empty = document.createElement('div'); empty.className = 'card p-8 text-center';
+        empty.innerHTML = '<p class="text-gray-400 text-lg">No meals selected this week.</p><p class="text-gray-300 text-sm mt-1">Add meals in the Planner tab first.</p>';
+        sec.appendChild(empty);
+        container.appendChild(sec);
+        return;
+      }
+
+      // ===== 1. WEEKLY NUTRITION & TIME SUMMARY =====
+      const totalCal = selectedMeals.reduce((s, m) => s + (m['Cal/Serve'] || 0), 0);
+      const totalProt = selectedMeals.reduce((s, m) => s + (m['Protein (g)'] || 0), 0);
+      const totalCarbs = selectedMeals.reduce((s, m) => s + (m['Carbs (g)'] || 0), 0);
+      const totalFat = selectedMeals.reduce((s, m) => s + (m['Fat (g)'] || 0), 0);
+      const totalPrep = selectedMeals.reduce((s, m) => s + (m['Prep Time (min)'] || 0), 0);
+      const totalCook = selectedMeals.reduce((s, m) => s + (m['Cook Time (min)'] || 0), 0);
+
+      const summaryCard = document.createElement('div'); summaryCard.className = 'card p-5';
+      summaryCard.innerHTML = `
+        <h3 class="font-semibold text-lg mb-4">📊 Weekly Summary</h3>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+          <div class="bg-gray-50 rounded-xl p-3">
+            <p class="text-xs text-gray-500 uppercase">Total Calories</p>
+            <p class="text-2xl font-bold">${totalCal}</p>
+            <p class="text-xs text-gray-400">${Math.round(totalCal/5)}/day avg</p>
+          </div>
+          <div class="bg-gray-50 rounded-xl p-3">
+            <p class="text-xs text-gray-500 uppercase">Protein</p>
+            <p class="text-2xl font-bold">${totalProt}g</p>
+            <p class="text-xs text-gray-400">${Math.round(totalProt/5)}g/day</p>
+          </div>
+          <div class="bg-gray-50 rounded-xl p-3">
+            <p class="text-xs text-gray-500 uppercase">Prep Time</p>
+            <p class="text-2xl font-bold">${totalPrep}m</p>
+            <p class="text-xs text-gray-400">${Math.round(totalPrep/5)}m/day</p>
+          </div>
+          <div class="bg-gray-50 rounded-xl p-3">
+            <p class="text-xs text-gray-500 uppercase">Cook Time</p>
+            <p class="text-2xl font-bold">${totalCook}m</p>
+            <p class="text-xs text-gray-400">${Math.round(totalCook/5)}m/day</p>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-2 mt-3 text-xs text-gray-500">
+          <span>Carbs: ${totalCarbs}g total</span>
+          <span>Fat: ${totalFat}g total</span>
+        </div>`;
+      sec.appendChild(summaryCard);
+
+      // ===== 2. BATCHED PREP LIST (THE KEY FEATURE) =====
+      const prepCard = document.createElement('div'); prepCard.className = 'card p-5';
+      prepCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">🔪 Batched Prep List <span class="text-xs text-gray-400 font-normal">(grouped by ingredient)</span></h3>';
+
+      // Collect all ingredients across all selected meals
+      const allIngredients = [];
+      selectedMeals.forEach(meal => {
+        const ingData = store.ingredientsMap[meal.ID];
+        if (ingData && ingData.length) {
+          ingData.forEach(i => allIngredients.push({ ...i, mealName: meal['Meal Name'], day: DAYS.find(d => store.selectedMeals[d]?.ID === meal.ID) }));
+        } else {
+          // Fallback: parse from meal fields
+          const serv = meal.Servings || 4;
+          (meal['Carb Source']||'').split(',').forEach(c => c && allIngredients.push({ name: c.trim(), quantity: 80*serv, unit: 'g', mealName: meal['Meal Name'] }));
+          (meal['Protein Source']||'').split(',').forEach(p => p && allIngredients.push({ name: p.trim(), quantity: 150*serv, unit: 'g', mealName: meal['Meal Name'] }));
+          (meal.Vegetables||'').split(',').forEach(v => v && allIngredients.push({ name: v.trim(), quantity: 50*serv, unit: 'g', mealName: meal['Meal Name'] }));
+        }
+      });
+
+      // Batch ingredients by normalized name
+      const batched = {};
+      allIngredients.forEach(ing => {
+        const key = ing.name.toLowerCase().replace(/[^a-z0-9]/g,'_');
+        if (!batched[key]) batched[key] = { name: ing.name, totalQty: 0, unit: ing.unit, meals: [] };
+        batched[key].totalQty += ing.quantity || 0;
+        if (!batched[key].meals.find(m => m.name === ing.mealName)) {
+          batched[key].meals.push({ name: ing.mealName, day: ing.day });
+        }
+      });
+
+      // Sort by category (produce first, then protein, then pantry)
+      const prepOrder = ['Produce', 'Protein', 'Plant-Based Protein', 'Dairy & Eggs', 'Grains & Pasta', 'Pantry Staples', 'Other'];
+      const sortedBatched = Object.values(batched).sort((a, b) => {
+        const catA = categorizeIngredient(a.name);
+        const catB = categorizeIngredient(b.name);
+        return prepOrder.indexOf(catA) - prepOrder.indexOf(catB);
+      });
+
+      if (sortedBatched.length) {
+        const batchedGrid = document.createElement('div'); batchedGrid.className = 'space-y-2';
+        sortedBatched.forEach(item => {
+          const row = document.createElement('div'); row.className = 'flex items-center gap-3 py-2.5 px-3 rounded-xl bg-gray-50';
+          row.innerHTML = `
+            <input type="checkbox" class="h-5 w-5 accent-green-700 flex-shrink-0">
+            <div class="flex-1">
+              <p class="font-semibold text-sm">${item.name} <span class="text-gray-500 font-normal text-xs">— ${Math.round(item.totalQty)}${item.unit} total</span></p>
+              <p class="text-xs text-gray-400">Used in: ${item.meals.map(m => m.name).join(', ')}</p>
+            </div>`;
+          batchedGrid.appendChild(row);
+        });
+        prepCard.appendChild(batchedGrid);
+      } else {
+        prepCard.innerHTML += '<p class="text-gray-400 text-sm">Upload Excel with Ingredients sheet for batched prep list.</p>';
+      }
+      sec.appendChild(prepCard);
+
+      // ===== 3. DAY-BY-DAY COOKING SCHEDULE =====
+      const scheduleCard = document.createElement('div'); scheduleCard.className = 'card p-5';
+      scheduleCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">📅 Cooking Schedule</h3>';
       DAYS.forEach(day => {
         const meal = store.selectedMeals[day];
-        const d = document.createElement('div'); d.className = 'border rounded-xl p-3';
-        d.innerHTML = `<p class="text-xs font-bold uppercase text-gray-500 mb-2">${day}</p>`;
-        if (meal) {
-          d.innerHTML += `
-            <p class="font-semibold">${meal['Meal Name']}</p>
-            <p class="text-xs text-gray-500">${meal.Cuisine} · ${meal.Difficulty}</p>
-            <p class="text-xs">🔥 ${meal['Cal/Serve']} | 💪 ${meal['Protein (g)']}g</p>
-            <p class="text-xs text-red-500">⚠️ ${meal.Allergens || 'None'}</p>
-            <p class="text-xs text-gray-400">❄️ ${meal['Fridge Storage (days)']}d fridge</p>
-            <p class="text-xs italic">💡 ${meal['Meal Prep Notes'] || '-'}</p>`;
-        } else d.innerHTML += '<p class="text-gray-300 text-sm">Empty</p>';
-        grid.appendChild(d);
-      });
-      overview.appendChild(grid);
-      sec.appendChild(overview);
-
-      const checklist = document.createElement('div'); checklist.className = 'card p-5';
-      checklist.innerHTML = '<h3 class="font-semibold text-lg mb-4">✅ Chef\'s Cooking Checklist</h3>';
-      let hm = false;
-      DAYS.forEach(day => {
-        const meal = store.selectedMeals[day]; if (!meal) return;
-        hm = true;
+        if (!meal) return;
         const method = store.methodsMap[meal.ID] || 'No method recorded.';
-        const row = document.createElement('div'); row.className = 'py-3 border-b flex items-start gap-3';
-        row.innerHTML = `<input type="checkbox" class="mt-1 h-5 w-5 accent-green-700"><div><p class="font-semibold">${meal['Meal Name']} <span class="text-sm text-gray-500">(${day})</span></p><p class="text-sm text-gray-600 mt-1">${method.substring(0,120)}…</p></div>`;
-        checklist.appendChild(row);
+        const daySection = document.createElement('div'); daySection.className = 'mb-4 pb-4 border-b last:border-0';
+        daySection.innerHTML = `
+          <div class="flex items-center gap-3 mb-2">
+            <input type="checkbox" class="h-5 w-5 accent-green-700">
+            <h4 class="font-semibold">${day}: ${meal['Meal Name']}</h4>
+          </div>
+          <p class="text-xs text-gray-500 ml-8">⏱ Prep ${meal['Prep Time (min)']}m + Cook ${meal['Cook Time (min)']}m | 🔥 ${meal['Cal/Serve']} cal | ⚠️ ${meal.Allergens || 'None'}</p>
+          <details class="ml-8 mt-2">
+            <summary class="text-xs text-blue-500 cursor-pointer hover:underline">Show method</summary>
+            <p class="text-xs text-gray-600 mt-1 whitespace-pre-line">${method}</p>
+          </details>`;
+        scheduleCard.appendChild(daySection);
       });
-      if (!hm) checklist.innerHTML += '<p class="text-gray-400">No meals selected.</p>';
-      sec.appendChild(checklist);
+      sec.appendChild(scheduleCard);
 
-      const logCard = document.createElement('div'); logCard.className = 'card p-5';
-      logCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">📜 Plan Change History</h3>';
-      const log = (() => { try { return JSON.parse(localStorage.getItem('prepify_plan_log')||'[]'); } catch(e) { return []; } })().reverse().slice(0,10);
-      if (!log.length) logCard.innerHTML += '<p class="text-gray-400">No activity yet.</p>';
-      else {
-        const table = document.createElement('table'); table.className = 'w-full text-sm';
-        table.innerHTML = `<thead><tr class="text-left text-gray-500">${DAYS.map(d=>`<th>${d.substring(0,3)}</th>`).join('')}</tr></thead><tbody></tbody>`;
-        const tbody = table.querySelector('tbody');
-        log.forEach(entry => {
-          const tr = document.createElement('tr');
-          tr.innerHTML = `<td class="py-2 text-xs text-gray-400">${new Date(entry.timestamp).toLocaleDateString()}</td>`;
-          DAYS.forEach(day => {
-            const id = entry.plan[day];
-            const ml = id ? store.meals.find(m => m.ID == id) : null;
-            tr.innerHTML += `<td class="py-2 text-xs">${ml ? ml['Meal Name'].substring(0,12) : (id ? '#'+id : '—')}</td>`;
+      // ===== 4. DELIVERY TRACKER =====
+      const trackerCard = document.createElement('div'); trackerCard.className = 'card p-5';
+      trackerCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">📦 Delivery Tracker</h3>';
+      const trackerGrid = document.createElement('div'); trackerGrid.className = 'grid grid-cols-1 md:grid-cols-5 gap-3';
+      DAYS.forEach(day => {
+        const meal = store.selectedMeals[day];
+        const col = document.createElement('div'); col.className = 'border rounded-xl p-3';
+        col.innerHTML = `<p class="text-xs font-bold uppercase text-gray-500 mb-2">${day}</p>`;
+        if (meal) {
+          col.innerHTML += `<p class="font-semibold text-sm">${meal['Meal Name']}</p>`;
+          ['Cooked', 'Packed', 'Delivered'].forEach(status => {
+            col.innerHTML += `
+              <label class="flex items-center gap-2 mt-2 text-xs cursor-pointer">
+                <input type="checkbox" class="accent-green-700 h-4 w-4">
+                <span>${status}</span>
+              </label>`;
           });
-          tbody.appendChild(tr);
+        } else {
+          col.innerHTML += '<p class="text-gray-300 text-xs">No meal</p>';
+        }
+        trackerGrid.appendChild(col);
+      });
+      trackerCard.appendChild(trackerGrid);
+      sec.appendChild(trackerCard);
+
+      // ===== 5. ALLERGEN WARNINGS =====
+      const allAllergens = new Set(selectedMeals.flatMap(m => (m.Allergens||'').split(',').map(s => s.trim()).filter(Boolean)));
+      if (allAllergens.size > 0) {
+        const allergenCard = document.createElement('div'); allergenCard.className = 'card p-5 border-red-200 bg-red-50';
+        allergenCard.innerHTML = `
+          <h3 class="font-semibold text-lg mb-2 text-red-700">⚠️ Allergen Warnings</h3>
+          <p class="text-sm text-red-600">This week contains: ${[...allAllergens].join(', ')}</p>
+          <p class="text-xs text-red-400 mt-1">Check cross-contamination when batch prepping.</p>`;
+        sec.appendChild(allergenCard);
+      }
+
+      // ===== 6. QUICK ACTIONS =====
+      const actionsCard = document.createElement('div'); actionsCard.className = 'card p-5';
+      actionsCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">⚙️ Quick Actions</h3>';
+      const printBtn = document.createElement('button'); printBtn.className = 'px-4 py-2 bg-gray-800 text-white rounded-xl text-sm mr-3'; printBtn.textContent = '🖨 Print Prep List';
+      printBtn.onclick = () => window.print();
+      actionsCard.appendChild(printBtn);
+      const copyBtn = document.createElement('button'); copyBtn.className = 'px-4 py-2 border rounded-xl text-sm'; copyBtn.textContent = '📋 Copy Prep List';
+      copyBtn.onclick = () => {
+        let text = '🔪 BATCHED PREP LIST\n\n';
+        sortedBatched.forEach(i => {
+          text += `☐ ${i.name} — ${Math.round(i.totalQty)}${i.unit} (for: ${i.meals.map(m => m.name).join(', ')})\n`;
         });
-        logCard.appendChild(table);
+        navigator.clipboard.writeText(text).then(() => alert('Prep list copied!'));
+      };
+      actionsCard.appendChild(copyBtn);
+      sec.appendChild(actionsCard);
+
+      // ===== 7. PLAN CHANGE HISTORY (compact) =====
+      const logCard = document.createElement('div'); logCard.className = 'card p-5';
+      logCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">📜 Recent Changes</h3>';
+      const log = (() => { try { return JSON.parse(localStorage.getItem('prepify_plan_log')||'[]'); } catch(e) { return []; } })().reverse().slice(0,5);
+      if (!log.length) logCard.innerHTML += '<p class="text-gray-400 text-sm">No activity yet.</p>';
+      else {
+        log.forEach(entry => {
+          const row = document.createElement('div'); row.className = 'text-xs text-gray-500 py-1';
+          row.textContent = `${new Date(entry.timestamp).toLocaleString()}: ${Object.values(entry.plan).join(', ') || 'cleared'}`;
+          logCard.appendChild(row);
+        });
       }
       sec.appendChild(logCard);
-
-      const settings = document.createElement('div'); settings.className = 'card p-5';
-      settings.innerHTML = '<h3 class="font-semibold text-lg mb-4">⚙️ Settings & Tools</h3>';
-      const resetBtn = document.createElement('button'); resetBtn.className = 'px-4 py-2 bg-red-500 text-white rounded-xl text-sm mr-3'; resetBtn.textContent = 'Reset All App Data';
-      resetBtn.onclick = () => { if (confirm('Clear all local data?')) { localStorage.clear(); location.reload(); } };
-      settings.appendChild(resetBtn);
-      const dlBtn = document.createElement('button'); dlBtn.className = 'px-4 py-2 bg-gray-800 text-white rounded-xl text-sm'; dlBtn.textContent = 'Download Plan JSON';
-      dlBtn.onclick = () => {
-        const data = { plan: {}, lastModified: Date.now() };
-        DAYS.forEach(d => { if (store.selectedMeals[d]) data.plan[d] = store.selectedMeals[d].ID; });
-        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'prepify-plan.json'; a.click();
-      };
-      settings.appendChild(dlBtn);
-      sec.appendChild(settings);
 
       container.appendChild(sec);
     }
