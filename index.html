@@ -122,7 +122,6 @@
       try { await fetch(`${API_BASE}/api/plan`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ plan: payload, lastModified: Date.now() }) }); } catch(e) {}
     }
 
-    // Push database (exact same as the working manual code)
     async function pushDatabaseToServer() {
       if (!store.meals.length) return;
       const payload = {
@@ -138,21 +137,12 @@
           body: JSON.stringify(payload)
         });
         const data = await res.json();
-        if (!data.success) {
-          console.warn('Database push rejected:', data.message);
-        }
-      } catch(e) {
-        console.error('Database push failed:', e);
-      }
+        if (!data.success) { console.warn('Database push rejected:', data.message); }
+      } catch(e) { console.error('Database push failed:', e); }
     }
 
-    // Called automatically on every emit, but we need to track if it's a database change.
-    // For simplicity, we push the database every time something changes.
     async function pushDatabaseIfNeeded() {
-      // only push if we actually have data
-      if (store.meals.length) {
-        await pushDatabaseToServer();
-      }
+      if (store.meals.length) { await pushDatabaseToServer(); }
     }
 
     async function pullFromServer() {
@@ -173,10 +163,7 @@
     async function pullDatabaseFromServer() {
       try {
         const url = `${API_BASE}/api/database?_=${Date.now()}`;
-        const res = await fetch(url, {
-          cache: 'no-store',
-          headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
-        });
+        const res = await fetch(url, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } });
         if (!res.ok) throw new Error(`Server error: ${res.status}`);
         const db = await res.json();
         if (db && db.meals && db.meals.length) {
@@ -184,14 +171,8 @@
           store.setIngredientsMap(db.ingredients || {});
           store.setMethodsMap(db.methods || {});
           return true;
-        } else {
-          console.warn('Database pull returned empty meals');
-          return false;
-        }
-      } catch(e) {
-        console.error('Database pull failed:', e);
-        return false;
-      }
+        } else { console.warn('Database pull returned empty meals'); return false; }
+      } catch(e) { console.error('Database pull failed:', e); return false; }
     }
 
     // ========== LOCAL STORAGE ==========
@@ -266,7 +247,6 @@
         store.setMethodsMap(methMap);
       }
 
-      // Immediately push the new database
       pushDatabaseToServer();
     }
 
@@ -359,31 +339,12 @@
       syncBtn.onclick = async function() {
         syncBtn.textContent = '⏳ Syncing...';
         syncBtn.disabled = true;
-
-        // 1) Push current database to server (if local meals exist)
-        if (store.meals.length) {
-          await pushDatabaseToServer();
-        }
-
-        // 2) Pull fresh database from server
+        if (store.meals.length) { await pushDatabaseToServer(); }
         const dbOk = await pullDatabaseFromServer();
-
-        // 3) Pull plan
-        if (store.meals.length) {
-          await pullFromServer();
-        }
-
+        if (store.meals.length) { await pullFromServer(); }
         refreshUI();
-
-        if (dbOk || store.meals.length) {
-          syncBtn.textContent = '✅ Synced';
-        } else {
-          syncBtn.textContent = '❌ Failed';
-        }
-        setTimeout(() => {
-          syncBtn.textContent = '🔄 Sync';
-          syncBtn.disabled = false;
-        }, 2000);
+        syncBtn.textContent = dbOk || store.meals.length ? '✅ Synced' : '❌ Failed';
+        setTimeout(() => { syncBtn.textContent = '🔄 Sync'; syncBtn.disabled = false; }, 2000);
       };
       header.appendChild(syncBtn);
 
@@ -392,21 +353,12 @@
       hardSyncBtn.textContent = '🗑 Hard Sync';
       hardSyncBtn.onclick = async function() {
         if (!confirm('Clear local cache and re‑pull from server?')) return;
-        localStorage.removeItem('prepify_meals');
-        localStorage.removeItem('prepify_ingredients');
-        localStorage.removeItem('prepify_methods');
-        store.meals = [];
-        store.ingredientsMap = {};
-        store.methodsMap = {};
+        localStorage.removeItem('prepify_meals'); localStorage.removeItem('prepify_ingredients'); localStorage.removeItem('prepify_methods');
+        store.meals = []; store.ingredientsMap = {}; store.methodsMap = {};
         refreshUI();
         const dbOk = await pullDatabaseFromServer();
-        if (dbOk) {
-          await pullFromServer();
-          refreshUI();
-          alert('Hard sync complete!');
-        } else {
-          alert('Failed to pull database.');
-        }
+        if (dbOk) { await pullFromServer(); refreshUI(); alert('Hard sync complete!'); }
+        else { alert('Failed to pull database.'); }
       };
       header.appendChild(hardSyncBtn);
       container.appendChild(header);
@@ -436,10 +388,259 @@
       app.appendChild(container);
     }
 
-    function renderPlanner(container) { /* unchanged from previous working version */ }
-    function renderShopping(container) { /* unchanged */ }
-    function renderMethods(container) { /* unchanged */ }
-    function renderAdminPanel(container) { /* unchanged */ }
+    // ========== PLANNER TAB ==========
+    function renderPlanner(container) {
+      const sec = document.createElement('div');
+      sec.innerHTML = `
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="font-display text-2xl font-semibold">5-Day Planner</h2>
+          <div class="flex gap-2">
+            <button id="autoBtn" class="px-4 py-2 bg-[#C17A5C] text-white rounded-xl text-sm font-semibold">✨ Auto-fill</button>
+            <button id="clearBtn" class="px-4 py-2 border border-gray-200 rounded-xl text-sm">Clear</button>
+          </div>
+        </div>`;
+      const grid = document.createElement('div'); grid.className = 'grid grid-cols-2 md:grid-cols-5 gap-4 mb-8';
+      DAYS.forEach(day => {
+        const meal = store.selectedMeals[day];
+        const card = document.createElement('div'); card.className = 'card p-4 cursor-pointer';
+        card.innerHTML = `<span class="text-xs font-bold uppercase text-gray-400">${day}</span>`;
+        if (meal) {
+          card.innerHTML += `
+            <h3 class="font-semibold text-base">${meal['Meal Name']}</h3>
+            <div class="flex gap-2 text-xs text-gray-500"><span>${meal.Cuisine}</span><span class="badge ${meal.Difficulty==='Easy'?'diff-easy':'diff-medium'}">${meal.Difficulty}</span></div>
+            <div class="grid grid-cols-4 gap-1 text-xs mt-1">
+              <div>🔥${meal['Cal/Serve']}</div><div>💪${meal['Protein (g)']}g</div><div>🍞${meal['Carbs (g)']}g</div><div>🧈${meal['Fat (g)']}g</div>
+            </div>
+            <button class="text-xs text-red-400 remove-btn">Remove</button>`;
+          card.querySelector('.remove-btn').onclick = (e) => { e.stopPropagation(); store.removeMeal(day); refreshUI(); };
+          card.onclick = () => openMealDetail(meal);
+        } else {
+          card.innerHTML += '<div class="text-gray-300 text-sm text-center py-4">+ Add</div>';
+        }
+        grid.appendChild(card);
+      });
+      sec.appendChild(grid);
+      container.appendChild(sec);
+
+      sec.querySelector('#autoBtn').onclick = () => { store.autoFillWeek(); refreshUI(); };
+      sec.querySelector('#clearBtn').onclick = () => { store.clearWeek(); refreshUI(); };
+
+      const browser = document.createElement('div');
+      browser.innerHTML = `
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="font-display text-xl font-semibold">Browse Meals</h3>
+          <button id="filterToggle" class="text-sm border border-gray-200 px-4 py-2 rounded-xl">🔽 Filters</button>
+        </div>
+        <div id="filterPanel" class="card p-4 mb-4 hidden"></div>
+        <div id="mealGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-96 overflow-y-auto"></div>`;
+      sec.appendChild(browser);
+
+      const filterPanel = browser.querySelector('#filterPanel');
+      filterPanel.innerHTML = `
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <select id="catFilter" class="border rounded-xl px-3 py-2 text-sm">
+            <option value="">All Categories</option><option>Pasta</option><option>Rice Bowl</option><option>Noodles</option><option>Wrap</option>
+          </select>
+          <select id="cuisineFilter" class="border rounded-xl px-3 py-2 text-sm">
+            <option value="">All Cuisines</option><option>Italian</option><option>Japanese</option><option>Thai</option><option>Mexican</option><option>Mediterranean</option><option>Indian</option><option>Asian Fusion</option><option>Korean</option>
+          </select>
+          <select id="diffFilter" class="border rounded-xl px-3 py-2 text-sm">
+            <option value="">Any Difficulty</option><option>Easy</option><option>Medium</option>
+          </select>
+          <input id="searchInput" placeholder="Search..." class="border rounded-xl px-3 py-2 text-sm">
+        </div>`;
+      const mealGrid = browser.querySelector('#mealGrid');
+      const filtered = store.getFilteredMeals();
+      mealGrid.innerHTML = filtered.length ? '' : '<p class="col-span-full text-center text-gray-400 py-10">No meals match.</p>';
+      filtered.forEach(meal => {
+        const card = document.createElement('div'); card.className = 'card p-3 flex flex-col gap-1 cursor-pointer';
+        card.innerHTML = `
+          <div class="flex justify-between">
+            <h4 class="font-semibold text-sm">${meal['Meal Name']}</h4>
+            <span class="badge badge-${meal.Category.toLowerCase().replace(' ','-')}">${meal.Category}</span>
+          </div>
+          <div class="text-xs text-gray-500">${meal.Cuisine} · ${meal.Difficulty} · ${meal['Cal/Serve']} cal</div>
+          <button class="mt-2 text-xs bg-green-700 text-white px-3 py-1.5 rounded-lg add-btn">+ Add</button>`;
+        card.querySelector('.add-btn').onclick = (e) => { e.stopPropagation(); openDayPicker(meal); };
+        card.onclick = () => openMealDetail(meal);
+        mealGrid.appendChild(card);
+      });
+
+      container.appendChild(sec);
+      document.getElementById('filterToggle')?.addEventListener('click', () => filterPanel.classList.toggle('hidden'));
+      ['catFilter','cuisineFilter','diffFilter'].forEach(id => {
+        document.getElementById(id)?.addEventListener('change', (e) => {
+          store.setFilters({ [id==='catFilter'?'category':id==='cuisineFilter'?'cuisine':'difficulty']: e.target.value });
+          refreshUI();
+        });
+      });
+      document.getElementById('searchInput')?.addEventListener('input', (e) => { store.setFilters({ search: e.target.value }); refreshUI(); });
+    }
+
+    // ========== SHOPPING TAB ==========
+    function renderShopping(container) {
+      const list = store.getShoppingList();
+      const sec = document.createElement('div');
+      sec.innerHTML = `
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="font-display text-2xl font-semibold">Shopping List</h2>
+          <div class="flex gap-2">${list.length ? `<button id="copyBtn" class="px-3 py-1.5 border rounded-xl text-sm">📋 Copy</button><button id="pdfBtn" class="px-3 py-1.5 bg-gray-800 text-white rounded-xl text-sm">PDF</button>` : ''}</div>
+        </div>`;
+      const content = document.createElement('div'); content.className = 'card p-5';
+      if (!list.length) content.innerHTML = '<p class="text-gray-400 text-center py-12">Select meals first.</p>';
+      else {
+        const grouped = {}; list.forEach(i => { if (!grouped[i.category]) grouped[i.category] = []; grouped[i.category].push(i); });
+        Object.entries(grouped).forEach(([cat, items]) => {
+          const div = document.createElement('div'); div.className = 'mb-4';
+          div.innerHTML = `<h3 class="text-sm font-semibold text-gray-500 uppercase mb-2">${cat} (${items.length})</h3>`;
+          items.forEach(item => {
+            const row = document.createElement('div'); row.className = `shopping-item flex items-center gap-3 py-2.5 px-2 rounded-xl cursor-pointer hover:bg-gray-50 ${store.shoppingChecked[item.key] ? 'checked' : ''}`;
+            row.innerHTML = `
+              <div class="check-dot w-5 h-5 rounded-full border-2 flex items-center justify-center text-white text-xs font-bold" style="background:${store.shoppingChecked[item.key]?'#8B9D6B':'white'};border-color:${store.shoppingChecked[item.key]?'#8B9D6B':'#d4cfc6'}">${store.shoppingChecked[item.key]?'✓':''}</div>
+              <span class="item-text text-sm flex-1 font-medium">${item.name} — ${item.quantity}${item.unit}</span>
+              <span class="text-xs text-gray-400 hidden sm:inline">${item.mealRefs.join(', ')}</span>`;
+            row.onclick = () => { store.toggleShoppingItem(item.key); refreshUI(); };
+            div.appendChild(row);
+          });
+          content.appendChild(div);
+        });
+        const total = list.length; const checked = list.filter(i => store.shoppingChecked[i.key]).length;
+        content.appendChild(Object.assign(document.createElement('div'), { className: 'mt-4 pt-3 border-t border-gray-100 text-sm text-gray-500 flex justify-between', innerHTML: `<span>${checked}/${total} checked</span><span>${total-checked} remaining</span>` }));
+      }
+      sec.appendChild(content);
+      container.appendChild(sec);
+      sec.querySelector('#copyBtn')?.addEventListener('click', () => {
+        let text = '🛒 PREPIFY SHOPPING LIST\n\n';
+        const groups = {}; list.forEach(i => { if (!groups[i.category]) groups[i.category] = []; groups[i.category].push(i); });
+        Object.entries(groups).forEach(([cat, items]) => { text += `📦 ${cat}\n`; items.forEach(i => text += `  ${store.shoppingChecked[i.key]?'☑':'☐'} ${i.name} — ${i.quantity}${i.unit}\n`); });
+        navigator.clipboard.writeText(text).then(() => alert('Copied!'));
+      });
+      sec.querySelector('#pdfBtn')?.addEventListener('click', () => {
+        const { jsPDF } = window.jspdf; const doc = new jsPDF(); doc.setFontSize(16); doc.text('Shopping List', 20, 20); let y = 30;
+        const groups = {}; list.forEach(i => { if (!groups[i.category]) groups[i.category] = []; groups[i.category].push(i); });
+        Object.entries(groups).forEach(([cat, items]) => { if (y > 270) { doc.addPage(); y = 20; } doc.setFontSize(10); doc.text(cat, 20, y); y += 6; items.forEach(i => { if (y > 275) { doc.addPage(); y = 20; } doc.text(`${store.shoppingChecked[i.key]?'[x]':'[ ]'} ${i.name} - ${i.quantity}${i.unit}`, 25, y); y += 5; }); y += 3; });
+        doc.save('prepify-shopping.pdf');
+      });
+    }
+
+    // ========== METHODS TAB ==========
+    function renderMethods(container) {
+      const sec = document.createElement('div');
+      sec.innerHTML = `<h2 class="font-display text-2xl font-semibold mb-4">👨‍🍳 Cooking Methods</h2>`;
+      const grid = document.createElement('div'); grid.className = 'space-y-4';
+      let has = false;
+      DAYS.forEach(day => {
+        const meal = store.selectedMeals[day]; if (!meal) return;
+        const method = store.methodsMap[meal.ID]; if (!method) return;
+        has = true;
+        const card = document.createElement('div'); card.className = 'card p-5';
+        card.innerHTML = `<h3 class="font-semibold text-lg">${meal['Meal Name']} <span class="text-sm text-gray-500">(${day})</span></h3><p class="text-sm mt-2 whitespace-pre-line leading-relaxed">${method}</p>`;
+        grid.appendChild(card);
+      });
+      if (!has) grid.innerHTML = '<p class="text-gray-400 text-center py-12">No methods available. Upload an Excel file with a Methods sheet, then select meals.</p>';
+      sec.appendChild(grid);
+      container.appendChild(sec);
+    }
+
+    // ========== ADMIN TAB ==========
+    function renderAdminPanel(container) {
+      if (!adminLoggedIn) {
+        const loginCard = document.createElement('div'); loginCard.className = 'card p-8 max-w-sm mx-auto mt-12';
+        const title = document.createElement('h2'); title.className = 'font-display text-2xl font-semibold mb-4 text-center'; title.textContent = 'Chef Login';
+        loginCard.appendChild(title);
+        const userInput = document.createElement('input'); userInput.type = 'text'; userInput.placeholder = 'Username'; userInput.className = 'w-full border rounded-xl px-4 py-3 mb-4';
+        loginCard.appendChild(userInput);
+        const passInput = document.createElement('input'); passInput.type = 'password'; passInput.placeholder = 'Password'; passInput.className = 'w-full border rounded-xl px-4 py-3 mb-4';
+        loginCard.appendChild(passInput);
+        const loginBtn = document.createElement('button'); loginBtn.className = 'w-full py-3 bg-[#C17A5C] text-white rounded-xl font-semibold'; loginBtn.textContent = 'Login';
+        loginBtn.onclick = () => { if (userInput.value === 'admin' && passInput.value === 'admin') { adminLoggedIn = true; refreshUI(); } else alert('Invalid credentials'); };
+        loginCard.appendChild(loginBtn);
+        container.appendChild(loginCard);
+        return;
+      }
+
+      const sec = document.createElement('div'); sec.className = 'space-y-8';
+      const hdr = document.createElement('div'); hdr.className = 'flex justify-between items-center';
+      hdr.innerHTML = '<h2 class="font-display text-2xl font-semibold">👑 Chef Dashboard</h2>';
+      const logoutBtn = document.createElement('button'); logoutBtn.className = 'text-sm text-red-500 hover:underline'; logoutBtn.textContent = 'Logout';
+      logoutBtn.onclick = () => { adminLoggedIn = false; refreshUI(); };
+      hdr.appendChild(logoutBtn);
+      sec.appendChild(hdr);
+
+      const overview = document.createElement('div'); overview.className = 'card p-5';
+      overview.innerHTML = '<h3 class="font-semibold text-lg mb-4">📋 Weekly Plan Overview</h3>';
+      const grid = document.createElement('div'); grid.className = 'grid grid-cols-1 md:grid-cols-5 gap-4';
+      DAYS.forEach(day => {
+        const meal = store.selectedMeals[day];
+        const d = document.createElement('div'); d.className = 'border rounded-xl p-3';
+        d.innerHTML = `<p class="text-xs font-bold uppercase text-gray-500 mb-2">${day}</p>`;
+        if (meal) {
+          d.innerHTML += `
+            <p class="font-semibold">${meal['Meal Name']}</p>
+            <p class="text-xs text-gray-500">${meal.Cuisine} · ${meal.Difficulty}</p>
+            <p class="text-xs">🔥 ${meal['Cal/Serve']} | 💪 ${meal['Protein (g)']}g</p>
+            <p class="text-xs text-red-500">⚠️ ${meal.Allergens || 'None'}</p>
+            <p class="text-xs text-gray-400">❄️ ${meal['Fridge Storage (days)']}d fridge</p>
+            <p class="text-xs italic">💡 ${meal['Meal Prep Notes'] || '-'}</p>`;
+        } else d.innerHTML += '<p class="text-gray-300 text-sm">Empty</p>';
+        grid.appendChild(d);
+      });
+      overview.appendChild(grid);
+      sec.appendChild(overview);
+
+      const checklist = document.createElement('div'); checklist.className = 'card p-5';
+      checklist.innerHTML = '<h3 class="font-semibold text-lg mb-4">✅ Chef\'s Cooking Checklist</h3>';
+      let hm = false;
+      DAYS.forEach(day => {
+        const meal = store.selectedMeals[day]; if (!meal) return;
+        hm = true;
+        const method = store.methodsMap[meal.ID] || 'No method recorded.';
+        const row = document.createElement('div'); row.className = 'py-3 border-b flex items-start gap-3';
+        row.innerHTML = `<input type="checkbox" class="mt-1 h-5 w-5 accent-green-700"><div><p class="font-semibold">${meal['Meal Name']} <span class="text-sm text-gray-500">(${day})</span></p><p class="text-sm text-gray-600 mt-1">${method.substring(0,120)}…</p></div>`;
+        checklist.appendChild(row);
+      });
+      if (!hm) checklist.innerHTML += '<p class="text-gray-400">No meals selected.</p>';
+      sec.appendChild(checklist);
+
+      const logCard = document.createElement('div'); logCard.className = 'card p-5';
+      logCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">📜 Plan Change History</h3>';
+      const log = (() => { try { return JSON.parse(localStorage.getItem('prepify_plan_log')||'[]'); } catch(e) { return []; } })().reverse().slice(0,10);
+      if (!log.length) logCard.innerHTML += '<p class="text-gray-400">No activity yet.</p>';
+      else {
+        const table = document.createElement('table'); table.className = 'w-full text-sm';
+        table.innerHTML = `<thead><tr class="text-left text-gray-500">${DAYS.map(d=>`<th>${d.substring(0,3)}</th>`).join('')}</tr></thead><tbody></tbody>`;
+        const tbody = table.querySelector('tbody');
+        log.forEach(entry => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td class="py-2 text-xs text-gray-400">${new Date(entry.timestamp).toLocaleDateString()}</td>`;
+          DAYS.forEach(day => {
+            const id = entry.plan[day];
+            const ml = id ? store.meals.find(m => m.ID == id) : null;
+            tr.innerHTML += `<td class="py-2 text-xs">${ml ? ml['Meal Name'].substring(0,12) : (id ? '#'+id : '—')}</td>`;
+          });
+          tbody.appendChild(tr);
+        });
+        logCard.appendChild(table);
+      }
+      sec.appendChild(logCard);
+
+      const settings = document.createElement('div'); settings.className = 'card p-5';
+      settings.innerHTML = '<h3 class="font-semibold text-lg mb-4">⚙️ Settings & Tools</h3>';
+      const resetBtn = document.createElement('button'); resetBtn.className = 'px-4 py-2 bg-red-500 text-white rounded-xl text-sm mr-3'; resetBtn.textContent = 'Reset All App Data';
+      resetBtn.onclick = () => { if (confirm('Clear all local data?')) { localStorage.clear(); location.reload(); } };
+      settings.appendChild(resetBtn);
+      const dlBtn = document.createElement('button'); dlBtn.className = 'px-4 py-2 bg-gray-800 text-white rounded-xl text-sm'; dlBtn.textContent = 'Download Plan JSON';
+      dlBtn.onclick = () => {
+        const data = { plan: {}, lastModified: Date.now() };
+        DAYS.forEach(d => { if (store.selectedMeals[d]) data.plan[d] = store.selectedMeals[d].ID; });
+        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'prepify-plan.json'; a.click();
+      };
+      settings.appendChild(dlBtn);
+      sec.appendChild(settings);
+
+      container.appendChild(sec);
+    }
 
     // ========== INIT ==========
     window.addEventListener('DOMContentLoaded', async () => {
