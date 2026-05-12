@@ -34,7 +34,6 @@
     .modal-overlay { position: fixed; inset: 0; background: rgba(40,36,31,0.4); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 1rem; }
     .modal-content { background: white; border-radius: 24px; max-width: 560px; width: 100%; max-height: 85vh; overflow-y: auto; }
 
-    /* Mobile optimisation */
     @media (max-width: 768px) {
       .card { padding: 0.75rem; }
       .tab-btn { padding: 0.4rem 0.9rem; font-size: 0.8rem; }
@@ -43,6 +42,46 @@
       h2.font-display { font-size: 1.5rem; }
       button, label, .tab-btn { min-height: 44px; }
     }
+
+    .meal-card {
+      display: flex;
+      flex-direction: column;
+      gap: 0.9rem;
+      padding: 1.3rem;
+      transition: all 0.2s ease;
+    }
+    .meal-card:hover {
+      box-shadow: 0 12px 28px rgba(61,58,54,0.1);
+      transform: translateY(-3px);
+    }
+    .meal-card .meal-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.7rem;
+      font-size: 0.85rem;
+      color: #5E5548;
+    }
+    .meal-card .meal-meta .diff-badge {
+      padding: 0.2rem 0.7rem;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .meal-card .add-btn {
+      margin-top: auto;
+      align-self: flex-start;
+      font-weight: 600;
+      font-size: 0.85rem;
+      padding: 0.55rem 1.3rem;
+      border-radius: 12px;
+      background: #8B9D6B;
+      color: white;
+      transition: background 0.2s;
+      border: none;
+      cursor: pointer;
+    }
+    .meal-card .add-btn:hover { background: #6d804f; }
   </style>
 </head>
 <body class="min-h-screen">
@@ -54,7 +93,6 @@
 
     const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
     const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
-    let adminLoggedIn = false;
 
     // ========== GLOBAL STATE ==========
     const store = {
@@ -258,7 +296,8 @@
       if (methSheet) {
         const methMap = {};
         XLSX.utils.sheet_to_json(wb.Sheets[methSheet]).forEach(r => {
-          if (r['Meal ID'] && r['Method (4 servings)']) methMap[r['Meal ID']] = r['Method (4 servings)'];
+          const id = r['Meal ID']; if (!id) return;
+          if (id && r['Method (4 servings)']) methMap[id] = r['Method (4 servings)'];
         });
         store.setMethodsMap(methMap);
       }
@@ -332,6 +371,7 @@
       const app = document.getElementById('app'); app.innerHTML = '';
       const container = document.createElement('div'); container.className = 'max-w-6xl mx-auto px-4 py-6';
 
+      // Header
       const header = document.createElement('header');
       header.className = 'flex flex-wrap items-center justify-between gap-3 mb-6';
       header.innerHTML = `
@@ -387,10 +427,11 @@
         return;
       }
 
+      // Tabs
       const tabs = document.createElement('div'); tabs.className = 'flex gap-2 bg-gray-100/80 p-1.5 rounded-2xl w-fit mb-6';
-      ['planner','shopping','methods','admin'].forEach(t => {
+      ['planner','shopping','methods','chef'].forEach(t => {
         const btn = document.createElement('button'); btn.className = `tab-btn ${store.activeTab === t ? 'active' : ''}`;
-        btn.textContent = t === 'planner' ? '📅 Planner' : t === 'shopping' ? '🛒 Shopping' : t === 'methods' ? '👨‍🍳 Methods' : '🔧 Admin';
+        btn.textContent = t === 'planner' ? '📅 Planner' : t === 'shopping' ? '🛒 Shopping' : t === 'methods' ? '👨‍🍳 Methods' : '👑 Chef';
         btn.onclick = () => { store.setActiveTab(t); refreshUI(); };
         tabs.appendChild(btn);
       });
@@ -399,7 +440,7 @@
       if (store.activeTab === 'planner') renderPlanner(container);
       else if (store.activeTab === 'shopping') renderShopping(container);
       else if (store.activeTab === 'methods') renderMethods(container);
-      else if (store.activeTab === 'admin') renderAdminPanel(container);
+      else if (store.activeTab === 'chef') renderChefDashboard(container);
 
       app.appendChild(container);
     }
@@ -441,56 +482,126 @@
       sec.querySelector('#autoBtn').onclick = () => { store.autoFillWeek(); refreshUI(); };
       sec.querySelector('#clearBtn').onclick = () => { store.clearWeek(); refreshUI(); };
 
+      // ===== BROWSE MEALS (improved layout & working filters) =====
       const browser = document.createElement('div');
-      browser.innerHTML = `
-        <div class="flex justify-between items-center mb-3">
-          <h3 class="font-display text-xl font-semibold">Browse Meals</h3>
-          <button id="filterToggle" class="text-sm border border-gray-200 px-4 py-2 rounded-xl">🔽 Filters</button>
+      browser.className = 'mt-8';
+      const browseHeader = document.createElement('div');
+      browseHeader.className = 'flex flex-wrap items-center justify-between gap-3 mb-4';
+      browseHeader.innerHTML = `
+        <h3 class="font-display text-2xl font-semibold">Browse Meals</h3>
+        <div class="flex gap-2">
+          <button id="filterToggle" class="border border-gray-300 px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-50 transition">
+            🔍 Filters
+          </button>
+          <button id="clearFiltersBtn" class="border border-gray-300 px-3 py-2 rounded-xl text-sm font-medium text-red-500 hover:bg-red-50 transition hidden">
+            ✕ Clear
+          </button>
         </div>
-        <div id="filterPanel" class="card p-4 mb-4 hidden"></div>
-        <div id="mealGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-96 overflow-y-auto"></div>`;
-      sec.appendChild(browser);
+      `;
 
-      const filterPanel = browser.querySelector('#filterPanel');
+      const filterPanel = document.createElement('div');
+      filterPanel.id = 'filterPanel';
+      filterPanel.className = 'card p-5 mb-5 hidden space-y-4';
       filterPanel.innerHTML = `
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <select id="catFilter" class="border rounded-xl px-3 py-2 text-sm">
-            <option value="">All Categories</option><option>Pasta</option><option>Rice Bowl</option><option>Noodles</option><option>Wrap</option>
-          </select>
-          <select id="cuisineFilter" class="border rounded-xl px-3 py-2 text-sm">
-            <option value="">All Cuisines</option><option>Italian</option><option>Japanese</option><option>Thai</option><option>Mexican</option><option>Mediterranean</option><option>Indian</option><option>Asian Fusion</option><option>Korean</option>
-          </select>
-          <select id="diffFilter" class="border rounded-xl px-3 py-2 text-sm">
-            <option value="">Any Difficulty</option><option>Easy</option><option>Medium</option>
-          </select>
-          <input id="searchInput" placeholder="Search..." class="border rounded-xl px-3 py-2 text-sm">
-        </div>`;
-      const mealGrid = browser.querySelector('#mealGrid');
-      const filtered = store.getFilteredMeals();
-      mealGrid.innerHTML = filtered.length ? '' : '<p class="col-span-full text-center text-gray-400 py-10">No meals match.</p>';
-      filtered.forEach(meal => {
-        const card = document.createElement('div'); card.className = 'card p-3 flex flex-col gap-1 cursor-pointer';
-        card.innerHTML = `
-          <div class="flex justify-between">
-            <h4 class="font-semibold text-sm">${meal['Meal Name']}</h4>
-            <span class="badge badge-${meal.Category.toLowerCase().replace(' ','-')}">${meal.Category}</span>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Category</label>
+            <select id="catFilter" class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white">
+              <option value="">All</option><option>Pasta</option><option>Rice Bowl</option><option>Noodles</option><option>Wrap</option>
+            </select>
           </div>
-          <div class="text-xs text-gray-500">${meal.Cuisine} · ${meal.Difficulty} · ${meal['Cal/Serve']} cal</div>
-          <button class="mt-2 text-xs bg-green-700 text-white px-3 py-1.5 rounded-lg add-btn">+ Add</button>`;
-        card.querySelector('.add-btn').onclick = (e) => { e.stopPropagation(); openDayPicker(meal); };
-        card.onclick = () => openMealDetail(meal);
-        mealGrid.appendChild(card);
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Cuisine</label>
+            <select id="cuisineFilter" class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white">
+              <option value="">All</option><option>Italian</option><option>Japanese</option><option>Thai</option><option>Mexican</option><option>Mediterranean</option><option>Indian</option><option>Asian Fusion</option><option>Korean</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Difficulty</label>
+            <select id="diffFilter" class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white">
+              <option value="">Any</option><option>Easy</option><option>Medium</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Search</label>
+            <input id="searchInput" placeholder="Search meals..." class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm">
+          </div>
+        </div>
+      `;
+
+      const mealGrid = document.createElement('div');
+      mealGrid.id = 'mealGrid';
+      mealGrid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto pr-1';
+
+      function refreshMealGrid() {
+        const filtered = store.getFilteredMeals();
+        mealGrid.innerHTML = filtered.length ? '' : '<p class="col-span-full text-center text-gray-400 py-12">No meals match your filters.</p>';
+        filtered.forEach(meal => {
+          const card = document.createElement('div');
+          card.className = 'card meal-card cursor-pointer';
+          card.innerHTML = `
+            <div class="flex items-start justify-between">
+              <h4 class="font-semibold text-base leading-snug">${meal['Meal Name']}</h4>
+              <span class="badge badge-${meal.Category.toLowerCase().replace(' ','-')} ml-2">${meal.Category}</span>
+            </div>
+            <div class="meal-meta">
+              <span>🌍 ${meal.Cuisine}</span>
+              <span>·</span>
+              <span class="diff-badge ${meal.Difficulty==='Easy'?'diff-easy':'diff-medium'}">${meal.Difficulty}</span>
+              <span>·</span>
+              <span>🔥 ${meal['Cal/Serve']} cal</span>
+            </div>
+            <div class="flex items-center justify-between mt-1">
+              <span class="text-xs text-gray-400">⏱ ${meal['Prep Time (min)']+meal['Cook Time (min)']}min</span>
+              <button class="add-btn">+ Add</button>
+            </div>`;
+          card.querySelector('.add-btn').onclick = (e) => { e.stopPropagation(); openDayPicker(meal); };
+          card.onclick = () => openMealDetail(meal);
+          mealGrid.appendChild(card);
+        });
+      }
+
+      function syncFilterUI() {
+        const f = store.filters;
+        document.getElementById('catFilter').value = f.category;
+        document.getElementById('cuisineFilter').value = f.cuisine;
+        document.getElementById('diffFilter').value = f.difficulty;
+        document.getElementById('searchInput').value = f.search;
+        const hasFilters = f.category || f.cuisine || f.difficulty || f.search;
+        const clearBtn = document.getElementById('clearFiltersBtn');
+        if (clearBtn) clearBtn.classList.toggle('hidden', !hasFilters);
+        if (hasFilters) filterPanel.classList.remove('hidden');
+      }
+
+      function applyFilterChange(newFilter) {
+        Object.assign(store.filters, newFilter);
+        syncFilterUI();
+        refreshMealGrid();
+      }
+
+      refreshMealGrid();
+      syncFilterUI();
+
+      browser.appendChild(browseHeader);
+      browser.appendChild(filterPanel);
+      browser.appendChild(mealGrid);
+      sec.appendChild(browser);
+      container.appendChild(sec);
+
+      const filterToggleBtn = browseHeader.querySelector('#filterToggle');
+      filterToggleBtn.addEventListener('click', () => {
+        filterPanel.classList.toggle('hidden');
       });
 
-      container.appendChild(sec);
-      document.getElementById('filterToggle')?.addEventListener('click', () => filterPanel.classList.toggle('hidden'));
-      ['catFilter','cuisineFilter','diffFilter'].forEach(id => {
-        document.getElementById(id)?.addEventListener('change', (e) => {
-          store.setFilters({ [id==='catFilter'?'category':id==='cuisineFilter'?'cuisine':'difficulty']: e.target.value });
-          refreshUI();
-        });
+      browseHeader.querySelector('#clearFiltersBtn').addEventListener('click', () => {
+        store.resetFilters();
+        refreshUI();
       });
-      document.getElementById('searchInput')?.addEventListener('input', (e) => { store.setFilters({ search: e.target.value }); refreshUI(); });
+
+      document.getElementById('catFilter').addEventListener('change', (e) => applyFilterChange({ category: e.target.value }));
+      document.getElementById('cuisineFilter').addEventListener('change', (e) => applyFilterChange({ cuisine: e.target.value }));
+      document.getElementById('diffFilter').addEventListener('change', (e) => applyFilterChange({ difficulty: e.target.value }));
+      document.getElementById('searchInput').addEventListener('input', (e) => applyFilterChange({ search: e.target.value }));
     }
 
     // ========== SHOPPING TAB ==========
@@ -558,31 +669,13 @@
       container.appendChild(sec);
     }
 
-    // ========== ADMIN TAB ==========
-    function renderAdminPanel(container) {
-      if (!adminLoggedIn) {
-        const loginCard = document.createElement('div'); loginCard.className = 'card p-8 max-w-sm mx-auto mt-12';
-        const title = document.createElement('h2'); title.className = 'font-display text-2xl font-semibold mb-4 text-center'; title.textContent = 'Chef Login';
-        loginCard.appendChild(title);
-        const userInput = document.createElement('input'); userInput.type = 'text'; userInput.placeholder = 'Username'; userInput.className = 'w-full border rounded-xl px-4 py-3 mb-4';
-        loginCard.appendChild(userInput);
-        const passInput = document.createElement('input'); passInput.type = 'password'; passInput.placeholder = 'Password'; passInput.className = 'w-full border rounded-xl px-4 py-3 mb-4';
-        loginCard.appendChild(passInput);
-        const loginBtn = document.createElement('button'); loginBtn.className = 'w-full py-3 bg-[#C17A5C] text-white rounded-xl font-semibold'; loginBtn.textContent = 'Login';
-        loginBtn.onclick = () => { if (userInput.value === 'admin' && passInput.value === 'admin') { adminLoggedIn = true; refreshUI(); } else alert('Invalid credentials'); };
-        loginCard.appendChild(loginBtn);
-        container.appendChild(loginCard);
-        return;
-      }
+    // ========== CHEF DASHBOARD TAB (no login) ==========
+    function renderChefDashboard(container) {
+      const sec = document.createElement('div');
+      sec.className = 'space-y-8';
+      sec.innerHTML = `<h2 class="font-display text-2xl font-semibold">👑 Chef Dashboard</h2>`;
 
-      const sec = document.createElement('div'); sec.className = 'space-y-8';
-      const hdr = document.createElement('div'); hdr.className = 'flex justify-between items-center';
-      hdr.innerHTML = '<h2 class="font-display text-2xl font-semibold">👑 Chef Dashboard</h2>';
-      const logoutBtn = document.createElement('button'); logoutBtn.className = 'text-sm text-red-500 hover:underline'; logoutBtn.textContent = 'Logout';
-      logoutBtn.onclick = () => { adminLoggedIn = false; refreshUI(); };
-      hdr.appendChild(logoutBtn);
-      sec.appendChild(hdr);
-
+      // Week Overview
       const overview = document.createElement('div'); overview.className = 'card p-5';
       overview.innerHTML = '<h3 class="font-semibold text-lg mb-4">📋 Weekly Plan Overview</h3>';
       const grid = document.createElement('div'); grid.className = 'grid grid-cols-1 md:grid-cols-5 gap-4';
@@ -604,6 +697,7 @@
       overview.appendChild(grid);
       sec.appendChild(overview);
 
+      // Cooking Checklist
       const checklist = document.createElement('div'); checklist.className = 'card p-5';
       checklist.innerHTML = '<h3 class="font-semibold text-lg mb-4">✅ Chef\'s Cooking Checklist</h3>';
       let hm = false;
@@ -618,6 +712,7 @@
       if (!hm) checklist.innerHTML += '<p class="text-gray-400">No meals selected.</p>';
       sec.appendChild(checklist);
 
+      // Activity Log
       const logCard = document.createElement('div'); logCard.className = 'card p-5';
       logCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">📜 Plan Change History</h3>';
       const log = (() => { try { return JSON.parse(localStorage.getItem('prepify_plan_log')||'[]'); } catch(e) { return []; } })().reverse().slice(0,10);
@@ -640,6 +735,7 @@
       }
       sec.appendChild(logCard);
 
+      // Settings
       const settings = document.createElement('div'); settings.className = 'card p-5';
       settings.innerHTML = '<h3 class="font-semibold text-lg mb-4">⚙️ Settings & Tools</h3>';
       const resetBtn = document.createElement('button'); resetBtn.className = 'px-4 py-2 bg-red-500 text-white rounded-xl text-sm mr-3'; resetBtn.textContent = 'Reset All App Data';
@@ -671,7 +767,6 @@
       refreshUI();
       setInterval(pullFromServer, 30000);
 
-      // Register service worker for offline support
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js');
       }
