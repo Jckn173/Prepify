@@ -43,48 +43,6 @@
       h2.font-display { font-size: 1.5rem; }
       button, label, .tab-btn { min-height: 44px; }
     }
-
-    /* Improved meal card */
-    .meal-card {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-      padding: 1.25rem;
-      transition: all 0.2s ease;
-    }
-    .meal-card:hover {
-      box-shadow: 0 12px 25px rgba(61,58,54,0.08);
-      transform: translateY(-2px);
-    }
-    .meal-card .meal-meta {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 0.5rem;
-      font-size: 0.85rem;
-      color: #5E5548;
-    }
-    .meal-card .meal-meta span {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.2rem;
-    }
-    .meal-card .add-btn {
-      margin-top: auto;
-      align-self: flex-start;
-      font-weight: 600;
-      font-size: 0.85rem;
-      padding: 0.5rem 1.2rem;
-      border-radius: 12px;
-      background: #8B9D6B;
-      color: white;
-      transition: background 0.2s;
-      border: none;
-      cursor: pointer;
-    }
-    .meal-card .add-btn:hover {
-      background: #6d804f;
-    }
   </style>
 </head>
 <body class="min-h-screen">
@@ -374,7 +332,6 @@
       const app = document.getElementById('app'); app.innerHTML = '';
       const container = document.createElement('div'); container.className = 'max-w-6xl mx-auto px-4 py-6';
 
-      // Header with upload and sync
       const header = document.createElement('header');
       header.className = 'flex flex-wrap items-center justify-between gap-3 mb-6';
       header.innerHTML = `
@@ -430,7 +387,6 @@
         return;
       }
 
-      // Tabs
       const tabs = document.createElement('div'); tabs.className = 'flex gap-2 bg-gray-100/80 p-1.5 rounded-2xl w-fit mb-6';
       ['planner','shopping','methods','admin'].forEach(t => {
         const btn = document.createElement('button'); btn.className = `tab-btn ${store.activeTab === t ? 'active' : ''}`;
@@ -485,137 +441,56 @@
       sec.querySelector('#autoBtn').onclick = () => { store.autoFillWeek(); refreshUI(); };
       sec.querySelector('#clearBtn').onclick = () => { store.clearWeek(); refreshUI(); };
 
-      // ========== BROWSE MEALS (IMPROVED) ==========
       const browser = document.createElement('div');
-      browser.className = 'mt-8';
-      const browseHeader = document.createElement('div');
-      browseHeader.className = 'flex flex-wrap items-center justify-between gap-3 mb-4';
-      browseHeader.innerHTML = `
-        <h3 class="font-display text-2xl font-semibold">Browse Meals</h3>
-        <div class="flex gap-2">
-          <button id="filterToggle" class="border border-gray-300 px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-50 transition">
-            🔍 Filters
-          </button>
-          <button id="clearFiltersBtn" class="border border-gray-300 px-3 py-2 rounded-xl text-sm font-medium text-red-500 hover:bg-red-50 transition hidden">
-            ✕ Clear
-          </button>
+      browser.innerHTML = `
+        <div class="flex justify-between items-center mb-3">
+          <h3 class="font-display text-xl font-semibold">Browse Meals</h3>
+          <button id="filterToggle" class="text-sm border border-gray-200 px-4 py-2 rounded-xl">🔽 Filters</button>
         </div>
-      `;
-
-      const filterPanel = document.createElement('div');
-      filterPanel.id = 'filterPanel';
-      filterPanel.className = 'card p-5 mb-5 hidden space-y-4';
-      filterPanel.innerHTML = `
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div>
-            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Category</label>
-            <select id="catFilter" class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white">
-              <option value="">All</option><option>Pasta</option><option>Rice Bowl</option><option>Noodles</option><option>Wrap</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Cuisine</label>
-            <select id="cuisineFilter" class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white">
-              <option value="">All</option><option>Italian</option><option>Japanese</option><option>Thai</option><option>Mexican</option><option>Mediterranean</option><option>Indian</option><option>Asian Fusion</option><option>Korean</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Difficulty</label>
-            <select id="diffFilter" class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm bg-white">
-              <option value="">Any</option><option>Easy</option><option>Medium</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Search</label>
-            <input id="searchInput" placeholder="Search meals..." class="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm">
-          </div>
-        </div>
-      `;
-
-      const mealGrid = document.createElement('div');
-      mealGrid.id = 'mealGrid';
-      mealGrid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto pr-1';
-
-      // Helper to render meal cards
-      function renderMealCards() {
-        const filtered = store.getFilteredMeals();
-        mealGrid.innerHTML = filtered.length ? '' : '<p class="col-span-full text-center text-gray-400 py-12">No meals match your filters.</p>';
-        filtered.forEach(meal => {
-          const card = document.createElement('div');
-          card.className = 'card meal-card cursor-pointer';
-          card.innerHTML = `
-            <div class="flex items-start justify-between">
-              <h4 class="font-semibold text-base leading-snug">${meal['Meal Name']}</h4>
-              <span class="badge badge-${meal.Category.toLowerCase().replace(' ','-')} ml-2">${meal.Category}</span>
-            </div>
-            <div class="meal-meta">
-              <span>🌍 ${meal.Cuisine}</span>
-              <span>·</span>
-              <span class="${meal.Difficulty==='Easy'?'diff-easy':'diff-medium'} px-1.5 py-0.5 rounded-full text-xs font-medium">${meal.Difficulty}</span>
-              <span>·</span>
-              <span>🔥 ${meal['Cal/Serve']} cal</span>
-            </div>
-            <div class="flex items-center justify-between mt-1">
-              <span class="text-xs text-gray-400">⏱ ${meal['Prep Time (min)']+meal['Cook Time (min)']}min</span>
-              <button class="add-btn">+ Add</button>
-            </div>`;
-          card.querySelector('.add-btn').onclick = (e) => { e.stopPropagation(); openDayPicker(meal); };
-          card.onclick = () => openMealDetail(meal);
-          mealGrid.appendChild(card);
-        });
-      }
-
-      // Initial render
-      renderMealCards();
-
-      browser.appendChild(browseHeader);
-      browser.appendChild(filterPanel);
-      browser.appendChild(mealGrid);
+        <div id="filterPanel" class="card p-4 mb-4 hidden"></div>
+        <div id="mealGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-96 overflow-y-auto"></div>`;
       sec.appendChild(browser);
+
+      const filterPanel = browser.querySelector('#filterPanel');
+      filterPanel.innerHTML = `
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <select id="catFilter" class="border rounded-xl px-3 py-2 text-sm">
+            <option value="">All Categories</option><option>Pasta</option><option>Rice Bowl</option><option>Noodles</option><option>Wrap</option>
+          </select>
+          <select id="cuisineFilter" class="border rounded-xl px-3 py-2 text-sm">
+            <option value="">All Cuisines</option><option>Italian</option><option>Japanese</option><option>Thai</option><option>Mexican</option><option>Mediterranean</option><option>Indian</option><option>Asian Fusion</option><option>Korean</option>
+          </select>
+          <select id="diffFilter" class="border rounded-xl px-3 py-2 text-sm">
+            <option value="">Any Difficulty</option><option>Easy</option><option>Medium</option>
+          </select>
+          <input id="searchInput" placeholder="Search..." class="border rounded-xl px-3 py-2 text-sm">
+        </div>`;
+      const mealGrid = browser.querySelector('#mealGrid');
+      const filtered = store.getFilteredMeals();
+      mealGrid.innerHTML = filtered.length ? '' : '<p class="col-span-full text-center text-gray-400 py-10">No meals match.</p>';
+      filtered.forEach(meal => {
+        const card = document.createElement('div'); card.className = 'card p-3 flex flex-col gap-1 cursor-pointer';
+        card.innerHTML = `
+          <div class="flex justify-between">
+            <h4 class="font-semibold text-sm">${meal['Meal Name']}</h4>
+            <span class="badge badge-${meal.Category.toLowerCase().replace(' ','-')}">${meal.Category}</span>
+          </div>
+          <div class="text-xs text-gray-500">${meal.Cuisine} · ${meal.Difficulty} · ${meal['Cal/Serve']} cal</div>
+          <button class="mt-2 text-xs bg-green-700 text-white px-3 py-1.5 rounded-lg add-btn">+ Add</button>`;
+        card.querySelector('.add-btn').onclick = (e) => { e.stopPropagation(); openDayPicker(meal); };
+        card.onclick = () => openMealDetail(meal);
+        mealGrid.appendChild(card);
+      });
+
       container.appendChild(sec);
-
-      // Filter toggle
-      const filterToggleBtn = browseHeader.querySelector('#filterToggle');
-      const clearFiltersBtn = browseHeader.querySelector('#clearFiltersBtn');
-      filterToggleBtn.addEventListener('click', () => {
-        filterPanel.classList.toggle('hidden');
-      });
-
-      // Clear filters button
-      clearFiltersBtn.addEventListener('click', () => {
-        store.resetFilters();
-        // Update UI for filters
-        document.getElementById('catFilter').value = '';
-        document.getElementById('cuisineFilter').value = '';
-        document.getElementById('diffFilter').value = '';
-        document.getElementById('searchInput').value = '';
-        clearFiltersBtn.classList.add('hidden');
-        renderMealCards();
-      });
-
-      // Show/hide clear button based on active filters
-      function updateClearButton() {
-        const f = store.filters;
-        const hasFilters = f.category || f.cuisine || f.difficulty || f.search;
-        clearFiltersBtn.classList.toggle('hidden', !hasFilters);
-      }
-
-      // Filter change handlers
+      document.getElementById('filterToggle')?.addEventListener('click', () => filterPanel.classList.toggle('hidden'));
       ['catFilter','cuisineFilter','diffFilter'].forEach(id => {
         document.getElementById(id)?.addEventListener('change', (e) => {
           store.setFilters({ [id==='catFilter'?'category':id==='cuisineFilter'?'cuisine':'difficulty']: e.target.value });
-          updateClearButton();
-          renderMealCards();
+          refreshUI();
         });
       });
-      document.getElementById('searchInput')?.addEventListener('input', (e) => {
-        store.setFilters({ search: e.target.value });
-        updateClearButton();
-        renderMealCards();
-      });
-
-      // Initial clear button state
-      updateClearButton();
+      document.getElementById('searchInput')?.addEventListener('input', (e) => { store.setFilters({ search: e.target.value }); refreshUI(); });
     }
 
     // ========== SHOPPING TAB ==========
@@ -779,6 +654,7 @@
       };
       settings.appendChild(dlBtn);
       sec.appendChild(settings);
+
       container.appendChild(sec);
     }
 
@@ -795,6 +671,7 @@
       refreshUI();
       setInterval(pullFromServer, 30000);
 
+      // Register service worker for offline support
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js');
       }
