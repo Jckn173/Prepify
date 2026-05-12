@@ -42,6 +42,43 @@
       h2.font-display { font-size: 1.5rem; }
       button, label, .tab-btn { min-height: 44px; }
     }
+
+    .meal-card {
+      display: flex;
+      flex-direction: column;
+      gap: 0.9rem;
+      padding: 1.3rem;
+      transition: all 0.2s ease;
+    }
+    .meal-card:hover { box-shadow: 0 12px 28px rgba(61,58,54,0.1); transform: translateY(-3px); }
+    .meal-card .meal-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.7rem;
+      font-size: 0.85rem;
+      color: #5E5548;
+    }
+    .meal-card .meal-meta .diff-badge {
+      padding: 0.2rem 0.7rem;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .meal-card .add-btn {
+      margin-top: auto;
+      align-self: flex-start;
+      font-weight: 600;
+      font-size: 0.85rem;
+      padding: 0.55rem 1.3rem;
+      border-radius: 12px;
+      background: #8B9D6B;
+      color: white;
+      transition: background 0.2s;
+      border: none;
+      cursor: pointer;
+    }
+    .meal-card .add-btn:hover { background: #6d804f; }
   </style>
 </head>
 <body class="min-h-screen">
@@ -53,34 +90,6 @@
 
     const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
     const FIVE_DAYS_MS = 5 * 24 * 60 * 60 * 1000;
-
-    // ========== PANTRY SYSTEM ==========
-    const PANTRY_KEY = 'prepify_pantry_v2';
-    
-    function getPantryStocked() {
-      try {
-        return JSON.parse(localStorage.getItem(PANTRY_KEY) || '{}');
-      } catch(e) {
-        return {};
-      }
-    }
-    
-    function markPantryItem(name) {
-      const stocked = getPantryStocked();
-      stocked[name.toLowerCase()] = Date.now();
-      localStorage.setItem(PANTRY_KEY, JSON.stringify(stocked));
-    }
-    
-    function unmarkPantryItem(name) {
-      const stocked = getPantryStocked();
-      delete stocked[name.toLowerCase()];
-      localStorage.setItem(PANTRY_KEY, JSON.stringify(stocked));
-    }
-    
-    function isPantryStocked(name) {
-      const stocked = getPantryStocked();
-      return !!stocked[name.toLowerCase()];
-    }
 
     // ========== GLOBAL STATE ==========
     const store = {
@@ -111,19 +120,7 @@
         this.selectedMeals = sel; this.emit();
       },
       clearWeek() { this.selectedMeals = {}; this.emit(); },
-      toggleShoppingItem(key) {
-        this.shoppingChecked = { ...this.shoppingChecked, [key]: !this.shoppingChecked[key] };
-        // 🆕 When a shopping item is checked off, mark pantry items as stocked
-        if (this.shoppingChecked[key]) {
-          // Find the item name from the shopping list
-          const list = this.getRawShoppingItems();
-          const item = list.find(i => (i.name?.toLowerCase().replace(/[^a-z0-9]/g,'_')) === key);
-          if (item && isPantryCategory(item.name)) {
-            markPantryItem(item.name);
-          }
-        }
-        this.emit();
-      },
+      toggleShoppingItem(key) { this.shoppingChecked = { ...this.shoppingChecked, [key]: !this.shoppingChecked[key] }; this.emit(); },
       setFilters(f) { this.filters = { ...this.filters, ...f }; this.emit(); },
       resetFilters() { this.filters = { category:'', cuisine:'', difficulty:'', maxTime:'', search:'' }; this.emit(); },
       setActiveTab(tab) { this.activeTab = tab; this.emit(); },
@@ -136,7 +133,7 @@
         if (f.search) { const q = f.search.toLowerCase(); res = res.filter(m => m['Meal Name'].toLowerCase().includes(q) || m.Cuisine.toLowerCase().includes(q)); }
         return res;
       },
-      getRawShoppingItems() {
+      getShoppingList() {
         const items = [];
         DAYS.forEach(day => {
           const meal = this.selectedMeals[day]; if (!meal) return;
@@ -150,20 +147,8 @@
             (meal.Vegetables||'').split(',').forEach(v => v && items.push({ name: v.trim(), quantity: 50*serv, unit: 'g', mealRef: meal['Meal Name'], category: 'Produce' }));
           }
         });
-        return items;
-      },
-      getShoppingList() {
-        const items = this.getRawShoppingItems();
-        // Filter out pantry items that are already stocked
-        const filteredItems = items.filter(item => {
-          const cat = categorizeIngredient(item.name);
-          // Always show produce, protein, and grains
-          if (cat === 'Produce' || cat === 'Protein' || cat === 'Grains & Pasta') return true;
-          // For pantry-type items, check if they're stocked
-          return !isPantryStocked(item.name);
-        });
         const merged = {};
-        filteredItems.forEach(i => {
+        items.forEach(i => {
           const key = i.name.toLowerCase().replace(/[^a-z0-9]/g,'_');
           if (merged[key]) { merged[key].quantity += i.quantity; if (!merged[key].mealRefs.includes(i.mealRef)) merged[key].mealRefs.push(i.mealRef); }
           else merged[key] = { ...i, key, mealRefs: [i.mealRef], quantity: i.quantity };
@@ -177,15 +162,7 @@
       if (/pasta|noodle|rice|quinoa|orzo|vermicelli|couscous|tortilla/.test(n)) return 'Grains & Pasta';
       if (/chicken|beef|pork|lamb|salmon|tuna|prawn|tofu|egg|chickpea|bean|lentil/.test(n)) return 'Protein';
       if (/broccoli|spinach|tomato|carrot|onion|garlic|cucumber|pepper|zucchini|lettuce|avocado|mango|lemon|lime/.test(n)) return 'Produce';
-      if (/oil|sauce|vinegar|spice|herb|salt|pepper|cumin|paprika|oregano|thyme|basil|parsley|coriander|mint|dill|sage|rosemary|bay|stock|broth|paste|miso|gochujang|harissa|tahini|honey|maple|soy|mirin|fish sauce|oyster|hoisin|ketchup|mustard/.test(n)) return 'Pantry Staples';
-      if (/canned|jar|tin|can/.test(n)) return 'Canned & Jarred';
-      if (/cheese|milk|cream|yoghurt|butter/.test(n)) return 'Dairy & Eggs';
       return 'Other';
-    }
-
-    function isPantryCategory(name) {
-      const cat = categorizeIngredient(name);
-      return cat === 'Pantry Staples' || cat === 'Canned & Jarred' || cat === 'Dairy & Eggs';
     }
 
     // ========== BACKEND SYNC ==========
@@ -198,15 +175,26 @@
 
     async function pushDatabaseToServer() {
       if (!store.meals.length) return;
-      const payload = { meals: store.meals, ingredients: store.ingredientsMap, methods: store.methodsMap, lastModified: Date.now() };
+      const payload = {
+        meals: store.meals,
+        ingredients: store.ingredientsMap,
+        methods: store.methodsMap,
+        lastModified: Date.now()
+      };
       try {
-        const res = await fetch(`${API_BASE}/api/database`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const res = await fetch(`${API_BASE}/api/database`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
         const data = await res.json();
-        if (!data.success) { console.warn('Database push rejected:', data.message); }
+        if (!data.success) console.warn('Database push rejected:', data.message);
       } catch(e) { console.error('Database push failed:', e); }
     }
 
-    async function pushDatabaseIfNeeded() { if (store.meals.length) { await pushDatabaseToServer(); } }
+    async function pushDatabaseIfNeeded() {
+      if (store.meals.length) await pushDatabaseToServer();
+    }
 
     async function pullFromServer() {
       if (!store.meals.length) return;
@@ -225,7 +213,8 @@
 
     async function pullDatabaseFromServer() {
       try {
-        const res = await fetch(`${API_BASE}/api/database?_=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } });
+        const url = `${API_BASE}/api/database?_=${Date.now()}`;
+        const res = await fetch(url, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } });
         if (!res.ok) throw new Error(`Server error: ${res.status}`);
         const db = await res.json();
         if (db && db.meals && db.meals.length) {
@@ -247,6 +236,11 @@
       const sel = {}; DAYS.forEach(d => { if (store.selectedMeals[d]) sel[d] = store.selectedMeals[d].ID; });
       localStorage.setItem('prepify_selections', JSON.stringify({ selectedMeals: sel, lastModified: Date.now() }));
       localStorage.setItem('prepify_shopping', JSON.stringify(store.shoppingChecked));
+      const log = JSON.parse(localStorage.getItem('prepify_plan_log') || '[]');
+      const snapshot = {}; DAYS.forEach(d => { if (store.selectedMeals[d]) snapshot[d] = store.selectedMeals[d].ID; });
+      log.push({ timestamp: new Date().toISOString(), plan: snapshot });
+      if (log.length > 50) log.shift();
+      localStorage.setItem('prepify_plan_log', JSON.stringify(log));
     }
 
     function loadLocalData() {
@@ -283,7 +277,6 @@
         'Carb Source': r['Carb Source']||'', 'Protein Source': r['Protein Source']||'', Vegetables: r.Vegetables||''
       }));
       store.setMeals(meals);
-
       const ingSheet = wb.SheetNames.find(n => n.toLowerCase().includes('ingredient'));
       if (ingSheet) {
         const ingMap = {};
@@ -294,7 +287,6 @@
         });
         store.setIngredientsMap(ingMap);
       }
-
       const methSheet = wb.SheetNames.find(n => n.toLowerCase().includes('method'));
       if (methSheet) {
         const methMap = {};
@@ -303,7 +295,6 @@
         });
         store.setMethodsMap(methMap);
       }
-
       pushDatabaseToServer();
     }
 
@@ -373,6 +364,7 @@
       const app = document.getElementById('app'); app.innerHTML = '';
       const container = document.createElement('div'); container.className = 'max-w-6xl mx-auto px-4 py-6';
 
+      // Header with upload and sync buttons
       const header = document.createElement('header');
       header.className = 'flex flex-wrap items-center justify-between gap-3 mb-6';
       header.innerHTML = `
@@ -396,9 +388,9 @@
       syncBtn.onclick = async function() {
         syncBtn.textContent = '⏳ Syncing...';
         syncBtn.disabled = true;
-        if (store.meals.length) { await pushDatabaseToServer(); }
+        if (store.meals.length) await pushDatabaseToServer();
         const dbOk = await pullDatabaseFromServer();
-        if (store.meals.length) { await pullFromServer(); }
+        if (store.meals.length) await pullFromServer();
         refreshUI();
         syncBtn.textContent = dbOk || store.meals.length ? '✅ Synced' : '❌ Failed';
         setTimeout(() => { syncBtn.textContent = '🔄 Sync'; syncBtn.disabled = false; }, 2000);
@@ -415,11 +407,12 @@
         refreshUI();
         const dbOk = await pullDatabaseFromServer();
         if (dbOk) { await pullFromServer(); refreshUI(); alert('Hard sync complete!'); }
-        else { alert('Failed to pull database.'); }
+        else alert('Failed to pull database.');
       };
       header.appendChild(hardSyncBtn);
       container.appendChild(header);
 
+      // Empty state
       if (!store.meals.length) {
         const empty = document.createElement('div'); empty.className = 'text-center py-20';
         empty.innerHTML = `<h2 class="font-display text-2xl font-semibold mb-2">No meal database loaded</h2><p class="text-gray-500">Upload your Excel, or tap <strong>🔄 Sync</strong> to pull the database from the server.</p>`;
@@ -428,19 +421,21 @@
         return;
       }
 
+      // Tabs
       const tabs = document.createElement('div'); tabs.className = 'flex gap-2 bg-gray-100/80 p-1.5 rounded-2xl w-fit mb-6';
       ['planner','shopping','methods','chef'].forEach(t => {
         const btn = document.createElement('button'); btn.className = `tab-btn ${store.activeTab === t ? 'active' : ''}`;
-        btn.textContent = t === 'planner' ? '📅 Planner' : t === 'shopping' ? '🛒 Shopping' : t === 'methods' ? '👨‍🍳 Methods' : '👨‍🍳 Chef';
+        btn.textContent = t === 'planner' ? '📅 Planner' : t === 'shopping' ? '🛒 Shopping' : t === 'methods' ? '👨‍🍳 Methods' : '👑 Chef';
         btn.onclick = () => { store.setActiveTab(t); refreshUI(); };
         tabs.appendChild(btn);
       });
       container.appendChild(tabs);
 
+      // Render active tab
       if (store.activeTab === 'planner') renderPlanner(container);
       else if (store.activeTab === 'shopping') renderShopping(container);
       else if (store.activeTab === 'methods') renderMethods(container);
-      else if (store.activeTab === 'chef') renderChefTab(container);
+      else if (store.activeTab === 'chef') renderChefDashboard(container);
 
       app.appendChild(container);
     }
@@ -452,7 +447,7 @@
         <div class="flex justify-between items-center mb-4">
           <h2 class="font-display text-2xl font-semibold">5-Day Planner</h2>
           <div class="flex gap-2">
-            <button id="autoBtn" class="px-4 py-2 bg-[#C17A5C] text-white rounded-xl text-sm font-semibold">✨ Auto‑fill</button>
+            <button id="autoBtn" class="px-4 py-2 bg-[#C17A5C] text-white rounded-xl text-sm font-semibold">✨ Auto-fill</button>
             <button id="clearBtn" class="px-4 py-2 border border-gray-200 rounded-xl text-sm">Clear</button>
           </div>
         </div>`;
@@ -462,81 +457,126 @@
         const card = document.createElement('div'); card.className = 'card p-4 cursor-pointer';
         card.innerHTML = `<span class="text-xs font-bold uppercase text-gray-400">${day}</span>`;
         if (meal) {
-          card.innerHTML += `<h3 class="font-semibold text-base">${meal['Meal Name']}</h3><div class="flex gap-2 text-xs text-gray-500"><span>${meal.Cuisine}</span><span class="badge ${meal.Difficulty==='Easy'?'diff-easy':'diff-medium'}">${meal.Difficulty}</span></div><div class="grid grid-cols-4 gap-1 text-xs mt-1"><div>🔥${meal['Cal/Serve']}</div><div>💪${meal['Protein (g)']}g</div><div>🍞${meal['Carbs (g)']}g</div><div>🧈${meal['Fat (g)']}g</div></div><button class="text-xs text-red-400 remove-btn">Remove</button>`;
+          card.innerHTML += `
+            <h3 class="font-semibold text-base">${meal['Meal Name']}</h3>
+            <div class="flex gap-2 text-xs text-gray-500"><span>${meal.Cuisine}</span><span class="badge ${meal.Difficulty==='Easy'?'diff-easy':'diff-medium'}">${meal.Difficulty}</span></div>
+            <div class="grid grid-cols-4 gap-1 text-xs mt-1">
+              <div>🔥${meal['Cal/Serve']}</div><div>💪${meal['Protein (g)']}g</div><div>🍞${meal['Carbs (g)']}g</div><div>🧈${meal['Fat (g)']}g</div>
+            </div>
+            <button class="text-xs text-red-400 remove-btn">Remove</button>`;
           card.querySelector('.remove-btn').onclick = (e) => { e.stopPropagation(); store.removeMeal(day); refreshUI(); };
           card.onclick = () => openMealDetail(meal);
-        } else { card.innerHTML += '<div class="text-gray-300 text-sm text-center py-4">+ Add</div>'; }
+        } else {
+          card.innerHTML += '<div class="text-gray-300 text-sm text-center py-4">+ Add</div>';
+        }
         grid.appendChild(card);
       });
       sec.appendChild(grid);
       container.appendChild(sec);
+
       sec.querySelector('#autoBtn').onclick = () => { store.autoFillWeek(); refreshUI(); };
       sec.querySelector('#clearBtn').onclick = () => { store.clearWeek(); refreshUI(); };
 
-      // Browser
+      // ===== BROWSE MEALS =====
       const browser = document.createElement('div');
-      const filterPanel = document.createElement('div'); filterPanel.id = 'filterPanel'; filterPanel.className = 'card p-4 mb-4 hidden';
-      const categories = ['All Categories', ...new Set(store.meals.map(m => m.Category))];
-      const cuisines = ['All Cuisines', ...new Set(store.meals.map(m => m.Cuisine))];
-      const difficulties = ['Any Difficulty', 'Easy', 'Medium'];
-      const proteins = ['All Proteins', ...new Set(store.meals.flatMap(m => (m['Protein Source']||'').split(',').map(s => s.trim()).filter(Boolean)))];
-      const selects = {};
-      [['catFilter', categories], ['cuisineFilter', cuisines], ['diffFilter', difficulties], ['protFilter', proteins]].forEach(([id, opts]) => {
-        const sel = document.createElement('select'); sel.id = id; sel.className = 'border rounded-xl px-3 py-2 text-sm bg-white';
-        opts.forEach(o => { const opt = document.createElement('option'); opt.value = o.startsWith('All') || o.startsWith('Any') ? '' : o; opt.textContent = o; sel.appendChild(opt); });
-        selects[id] = sel;
-      });
-      const searchInput = document.createElement('input'); searchInput.type = 'text'; searchInput.placeholder = 'Search meals...'; searchInput.className = 'border rounded-xl px-3 py-2 text-sm'; searchInput.id = 'searchInput';
-      const filterGrid = document.createElement('div'); filterGrid.className = 'grid grid-cols-2 md:grid-cols-5 gap-3';
-      filterGrid.append(selects['catFilter'], selects['cuisineFilter'], selects['diffFilter'], selects['protFilter'], searchInput);
-      filterPanel.appendChild(filterGrid);
-      browser.appendChild(filterPanel);
+      browser.className = 'mt-8';
+      const browseHeader = document.createElement('div');
+      browseHeader.className = 'flex flex-wrap items-center justify-between gap-3 mb-4';
+      browseHeader.innerHTML = `
+        <h3 class="font-display text-2xl font-semibold">Browse Meals</h3>
+        <div class="flex gap-2">
+          <button id="filterToggle" class="border border-gray-300 px-4 py-2 rounded-xl text-sm font-medium hover:bg-gray-50 transition">🔍 Filters</button>
+          <button id="clearFiltersBtn" class="border border-gray-300 px-3 py-2 rounded-xl text-sm font-medium text-red-500 hover:bg-red-50 transition hidden">✕ Clear</button>
+        </div>
+      `;
+      const filterPanel = document.createElement('div');
+      filterPanel.id = 'filterPanel';
+      filterPanel.className = 'card p-5 mb-5 hidden space-y-4';
+      filterPanel.innerHTML = `
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div><label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Category</label><select id="catFilter" class="w-full border rounded-xl px-3 py-2.5 text-sm bg-white"><option value="">All</option><option>Pasta</option><option>Rice Bowl</option><option>Noodles</option><option>Wrap</option></select></div>
+          <div><label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Cuisine</label><select id="cuisineFilter" class="w-full border rounded-xl px-3 py-2.5 text-sm bg-white"><option value="">All</option><option>Italian</option><option>Japanese</option><option>Thai</option><option>Mexican</option><option>Mediterranean</option><option>Indian</option><option>Asian Fusion</option><option>Korean</option></select></div>
+          <div><label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Difficulty</label><select id="diffFilter" class="w-full border rounded-xl px-3 py-2.5 text-sm bg-white"><option value="">Any</option><option>Easy</option><option>Medium</option></select></div>
+          <div><label class="block text-xs font-semibold text-gray-500 uppercase mb-1">Search</label><input id="searchInput" placeholder="Search meals..." class="w-full border rounded-xl px-3 py-2.5 text-sm"></div>
+        </div>
+      `;
+      const mealGrid = document.createElement('div');
+      mealGrid.id = 'mealGrid';
+      mealGrid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto pr-1';
 
-      const filterHeader = document.createElement('div'); filterHeader.className = 'flex justify-between items-center mb-3';
-      filterHeader.innerHTML = '<h3 class="font-display text-xl font-semibold">Browse Meals</h3>';
-      const filterToggleBtn = document.createElement('button'); filterToggleBtn.className = 'text-sm border border-gray-200 px-4 py-2 rounded-xl hover:bg-gray-50 transition'; filterToggleBtn.textContent = '🔽 Filters';
-      filterToggleBtn.addEventListener('click', () => filterPanel.classList.toggle('hidden'));
-      filterHeader.appendChild(filterToggleBtn);
-      browser.appendChild(filterHeader);
-
-      const mealGrid = document.createElement('div'); mealGrid.id = 'mealGrid'; mealGrid.className = 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-96 overflow-y-auto pr-1';
-      browser.appendChild(mealGrid);
-      sec.appendChild(browser);
-      container.appendChild(sec);
-
-      const updateMealGrid = () => {
+      function refreshMealGrid() {
         const filtered = store.getFilteredMeals();
-        const protVal = selects['protFilter'].value;
-        const finalMeals = protVal ? filtered.filter(m => (m['Protein Source']||'').toLowerCase().includes(protVal.toLowerCase())) : filtered;
-        mealGrid.innerHTML = finalMeals.length ? '' : '<p class="col-span-full text-center text-gray-400 py-10">No meals match.</p>';
-        finalMeals.forEach(meal => {
-          const card = document.createElement('div'); card.className = 'card p-3 flex flex-col gap-1 cursor-pointer';
-          card.innerHTML = `<div class="flex justify-between"><h4 class="font-semibold text-sm">${meal['Meal Name']}</h4><span class="badge badge-${meal.Category.toLowerCase().replace(' ','-')}">${meal.Category}</span></div><div class="text-xs text-gray-500">${meal.Cuisine} · ${meal.Difficulty} · ${meal['Cal/Serve']} cal</div><button class="mt-2 text-xs bg-green-700 text-white px-3 py-1.5 rounded-lg add-btn">+ Add</button>`;
+        mealGrid.innerHTML = filtered.length ? '' : '<p class="col-span-full text-center text-gray-400 py-12">No meals match.</p>';
+        filtered.forEach(meal => {
+          const card = document.createElement('div');
+          card.className = 'card meal-card cursor-pointer';
+          card.innerHTML = `
+            <div class="flex items-start justify-between">
+              <h4 class="font-semibold text-base leading-snug">${meal['Meal Name']}</h4>
+              <span class="badge badge-${meal.Category.toLowerCase().replace(' ','-')} ml-2">${meal.Category}</span>
+            </div>
+            <div class="meal-meta">
+              <span>🌍 ${meal.Cuisine}</span>
+              <span>·</span>
+              <span class="diff-badge ${meal.Difficulty==='Easy'?'diff-easy':'diff-medium'}">${meal.Difficulty}</span>
+              <span>·</span>
+              <span>🔥 ${meal['Cal/Serve']} cal</span>
+            </div>
+            <div class="flex items-center justify-between mt-1">
+              <span class="text-xs text-gray-400">⏱ ${meal['Prep Time (min)']+meal['Cook Time (min)']}min</span>
+              <button class="add-btn">+ Add</button>
+            </div>`;
           card.querySelector('.add-btn').onclick = (e) => { e.stopPropagation(); openDayPicker(meal); };
           card.onclick = () => openMealDetail(meal);
           mealGrid.appendChild(card);
         });
-      };
-      updateMealGrid();
+      }
 
-      const apply = () => {
-        store.setFilters({ category: selects['catFilter'].value, cuisine: selects['cuisineFilter'].value, difficulty: selects['diffFilter'].value });
-        updateMealGrid();
-      };
-      selects['catFilter'].addEventListener('change', apply);
-      selects['cuisineFilter'].addEventListener('change', apply);
-      selects['diffFilter'].addEventListener('change', apply);
-      selects['protFilter'].addEventListener('change', updateMealGrid);
-      searchInput.addEventListener('input', (e) => { store.setFilters({ search: e.target.value }); updateMealGrid(); });
+      function syncFilterUI() {
+        const f = store.filters;
+        document.getElementById('catFilter').value = f.category;
+        document.getElementById('cuisineFilter').value = f.cuisine;
+        document.getElementById('diffFilter').value = f.difficulty;
+        document.getElementById('searchInput').value = f.search;
+        const hasFilters = f.category || f.cuisine || f.difficulty || f.search;
+        document.getElementById('clearFiltersBtn').classList.toggle('hidden', !hasFilters);
+        if (hasFilters) filterPanel.classList.remove('hidden');
+      }
+
+      function applyFilterChange(newFilter) {
+        Object.assign(store.filters, newFilter);
+        syncFilterUI();
+        refreshMealGrid();
+      }
+
+      refreshMealGrid();
+      syncFilterUI();
+
+      browser.appendChild(browseHeader);
+      browser.appendChild(filterPanel);
+      browser.appendChild(mealGrid);
+      sec.appendChild(browser);
+      container.appendChild(sec);
+
+      browseHeader.querySelector('#filterToggle').addEventListener('click', () => filterPanel.classList.toggle('hidden'));
+      browseHeader.querySelector('#clearFiltersBtn').addEventListener('click', () => { store.resetFilters(); refreshUI(); });
+      document.getElementById('catFilter').addEventListener('change', (e) => applyFilterChange({ category: e.target.value }));
+      document.getElementById('cuisineFilter').addEventListener('change', (e) => applyFilterChange({ cuisine: e.target.value }));
+      document.getElementById('diffFilter').addEventListener('change', (e) => applyFilterChange({ difficulty: e.target.value }));
+      document.getElementById('searchInput').addEventListener('input', (e) => applyFilterChange({ search: e.target.value }));
     }
 
     // ========== SHOPPING TAB ==========
     function renderShopping(container) {
       const list = store.getShoppingList();
       const sec = document.createElement('div');
-      sec.innerHTML = `<div class="flex justify-between items-center mb-4"><h2 class="font-display text-2xl font-semibold">Shopping List</h2><div class="flex gap-2">${list.length ? `<button id="copyBtn" class="px-3 py-1.5 border rounded-xl text-sm">📋 Copy</button><button id="pdfBtn" class="px-3 py-1.5 bg-gray-800 text-white rounded-xl text-sm">PDF</button>` : ''}</div></div>`;
+      sec.innerHTML = `
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="font-display text-2xl font-semibold">Shopping List</h2>
+          <div class="flex gap-2">${list.length ? `<button id="copyBtn" class="px-3 py-1.5 border rounded-xl text-sm">📋 Copy</button><button id="pdfBtn" class="px-3 py-1.5 bg-gray-800 text-white rounded-xl text-sm">PDF</button>` : ''}</div>
+        </div>`;
       const content = document.createElement('div'); content.className = 'card p-5';
-      if (!list.length) content.innerHTML = '<p class="text-gray-400 text-center py-12">Select meals first. Pantry items are automatically hidden.</p>';
+      if (!list.length) content.innerHTML = '<p class="text-gray-400 text-center py-12">Select meals first.</p>';
       else {
         const grouped = {}; list.forEach(i => { if (!grouped[i.category]) grouped[i.category] = []; grouped[i.category].push(i); });
         Object.entries(grouped).forEach(([cat, items]) => {
@@ -544,28 +584,38 @@
           div.innerHTML = `<h3 class="text-sm font-semibold text-gray-500 uppercase mb-2">${cat} (${items.length})</h3>`;
           items.forEach(item => {
             const row = document.createElement('div'); row.className = `shopping-item flex items-center gap-3 py-2.5 px-2 rounded-xl cursor-pointer hover:bg-gray-50 ${store.shoppingChecked[item.key] ? 'checked' : ''}`;
-            row.innerHTML = `<div class="check-dot w-5 h-5 rounded-full border-2 flex items-center justify-center text-white text-xs font-bold" style="background:${store.shoppingChecked[item.key]?'#8B9D6B':'white'};border-color:${store.shoppingChecked[item.key]?'#8B9D6B':'#d4cfc6'}">${store.shoppingChecked[item.key]?'✓':''}</div><span class="item-text text-sm flex-1 font-medium">${item.name} — ${item.quantity}${item.unit}</span><span class="text-xs text-gray-400 hidden sm:inline">${item.mealRefs.join(', ')}</span>`;
+            row.innerHTML = `
+              <div class="check-dot w-5 h-5 rounded-full border-2 flex items-center justify-center text-white text-xs font-bold" style="background:${store.shoppingChecked[item.key]?'#8B9D6B':'white'};border-color:${store.shoppingChecked[item.key]?'#8B9D6B':'#d4cfc6'}">${store.shoppingChecked[item.key]?'✓':''}</div>
+              <span class="item-text text-sm flex-1 font-medium">${item.name} — ${item.quantity}${item.unit}</span>
+              <span class="text-xs text-gray-400 hidden sm:inline">${item.mealRefs.join(', ')}</span>`;
             row.onclick = () => { store.toggleShoppingItem(item.key); refreshUI(); };
             div.appendChild(row);
           });
           content.appendChild(div);
         });
-        content.appendChild(Object.assign(document.createElement('div'), { className: 'mt-4 pt-3 border-t border-gray-100 text-sm text-gray-500 flex justify-between', innerHTML: `${list.filter(i=>store.shoppingChecked[i.key]).length}/${list.length} checked` }));
+        const total = list.length; const checked = list.filter(i => store.shoppingChecked[i.key]).length;
+        content.appendChild(Object.assign(document.createElement('div'), { className: 'mt-4 pt-3 border-t border-gray-100 text-sm text-gray-500 flex justify-between', innerHTML: `<span>${checked}/${total} checked</span><span>${total-checked} remaining</span>` }));
       }
       sec.appendChild(content);
       container.appendChild(sec);
       sec.querySelector('#copyBtn')?.addEventListener('click', () => {
-        let t = '🛒 SHOPPING LIST\n\n';
-        const g = {}; list.forEach(i => { if(!g[i.category]) g[i.category]=[]; g[i.category].push(i); });
-        Object.entries(g).forEach(([c,items]) => { t += `📦 ${c}\n`; items.forEach(i => t += `  ${store.shoppingChecked[i.key]?'☑':'☐'} ${i.name} — ${i.quantity}${i.unit}\n`); });
-        navigator.clipboard.writeText(t).then(() => alert('Copied!'));
+        let text = '🛒 PREPIFY SHOPPING LIST\n\n';
+        const groups = {}; list.forEach(i => { if (!groups[i.category]) groups[i.category] = []; groups[i.category].push(i); });
+        Object.entries(groups).forEach(([cat, items]) => { text += `📦 ${cat}\n`; items.forEach(i => text += `  ${store.shoppingChecked[i.key]?'☑':'☐'} ${i.name} — ${i.quantity}${i.unit}\n`); });
+        navigator.clipboard.writeText(text).then(() => alert('Copied!'));
+      });
+      sec.querySelector('#pdfBtn')?.addEventListener('click', () => {
+        const { jsPDF } = window.jspdf; const doc = new jsPDF(); doc.setFontSize(16); doc.text('Shopping List', 20, 20); let y = 30;
+        const groups = {}; list.forEach(i => { if (!groups[i.category]) groups[i.category] = []; groups[i.category].push(i); });
+        Object.entries(groups).forEach(([cat, items]) => { if (y > 270) { doc.addPage(); y = 20; } doc.setFontSize(10); doc.text(cat, 20, y); y += 6; items.forEach(i => { if (y > 275) { doc.addPage(); y = 20; } doc.text(`${store.shoppingChecked[i.key]?'[x]':'[ ]'} ${i.name} - ${i.quantity}${i.unit}`, 25, y); y += 5; }); y += 3; });
+        doc.save('prepify-shopping.pdf');
       });
     }
 
     // ========== METHODS TAB ==========
     function renderMethods(container) {
       const sec = document.createElement('div');
-      sec.innerHTML = '<h2 class="font-display text-2xl font-semibold mb-4">👨‍🍳 Cooking Methods</h2>';
+      sec.innerHTML = `<h2 class="font-display text-2xl font-semibold mb-4">👨‍🍳 Cooking Methods</h2>`;
       const grid = document.createElement('div'); grid.className = 'space-y-4';
       let has = false;
       DAYS.forEach(day => {
@@ -576,114 +626,92 @@
         card.innerHTML = `<h3 class="font-semibold text-lg">${meal['Meal Name']} <span class="text-sm text-gray-500">(${day})</span></h3><p class="text-sm mt-2 whitespace-pre-line leading-relaxed">${method}</p>`;
         grid.appendChild(card);
       });
-      if (!has) grid.innerHTML = '<p class="text-gray-400 text-center py-12">No methods available.</p>';
+      if (!has) grid.innerHTML = '<p class="text-gray-400 text-center py-12">No methods available. Upload an Excel file with a Methods sheet, then select meals.</p>';
       sec.appendChild(grid);
       container.appendChild(sec);
     }
 
-    // ========== CHEF TAB ==========
-    function renderChefTab(container) {
-      const sec = document.createElement('div'); sec.className = 'space-y-6';
-      sec.innerHTML = '<h2 class="font-display text-2xl font-semibold">👨‍🍳 Chef\'s Command Center</h2>';
-      const selectedMeals = DAYS.map(d => store.selectedMeals[d]).filter(Boolean);
-      if (!selectedMeals.length) {
-        sec.innerHTML += '<div class="card p-8 text-center"><p class="text-gray-400 text-lg">No meals selected.</p></div>';
-        container.appendChild(sec); return;
-      }
+    // ========== CHEF DASHBOARD ==========
+    function renderChefDashboard(container) {
+      const sec = document.createElement('div');
+      sec.className = 'space-y-8';
+      sec.innerHTML = `<h2 class="font-display text-2xl font-semibold">👑 Chef Dashboard</h2>`;
 
-      // Summary
-      const tc = selectedMeals.reduce((s,m)=>s+(m['Cal/Serve']||0),0);
-      const tp = selectedMeals.reduce((s,m)=>s+(m['Protein (g)']||0),0);
-      const tpr = selectedMeals.reduce((s,m)=>s+(m['Prep Time (min)']||0),0);
-      const tco = selectedMeals.reduce((s,m)=>s+(m['Cook Time (min)']||0),0);
-      const sum = document.createElement('div'); sum.className = 'card p-5';
-      sum.innerHTML = `<h3 class="font-semibold text-lg mb-4">📊 Weekly Summary</h3><div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center"><div class="bg-gray-50 rounded-xl p-3"><p class="text-xs text-gray-500">Calories</p><p class="text-2xl font-bold">${tc}</p></div><div class="bg-gray-50 rounded-xl p-3"><p class="text-xs text-gray-500">Protein</p><p class="text-2xl font-bold">${tp}g</p></div><div class="bg-gray-50 rounded-xl p-3"><p class="text-xs text-gray-500">Prep</p><p class="text-2xl font-bold">${tpr}m</p></div><div class="bg-gray-50 rounded-xl p-3"><p class="text-xs text-gray-500">Cook</p><p class="text-2xl font-bold">${tco}m</p></div></div>`;
-      sec.appendChild(sum);
-
-      // Batched Prep List
-      const prep = document.createElement('div'); prep.className = 'card p-5';
-      prep.innerHTML = '<h3 class="font-semibold text-lg mb-4">🔪 Batched Prep List</h3>';
-      const allIng = [];
-      selectedMeals.forEach(meal => {
-        const ingData = store.ingredientsMap[meal.ID];
-        if (ingData) ingData.forEach(i => allIng.push({ ...i, mealName: meal['Meal Name'] }));
-      });
-      const batched = {};
-      allIng.forEach(i => {
-        const k = i.name.toLowerCase().replace(/[^a-z0-9]/g,'_');
-        if (!batched[k]) batched[k] = { name: i.name, totalQty: 0, unit: i.unit, meals: [] };
-        batched[k].totalQty += i.quantity||0;
-        if (!batched[k].meals.find(m=>m.name===i.mealName)) batched[k].meals.push({ name: i.mealName });
-      });
-      const sorted = Object.values(batched).sort((a,b)=>a.name.localeCompare(b.name));
-      const bGrid = document.createElement('div'); bGrid.className = 'space-y-2 max-h-96 overflow-y-auto';
-      sorted.forEach(item => {
-        const r = document.createElement('div'); r.className = 'flex items-center gap-3 py-2.5 px-3 rounded-xl bg-gray-50';
-        r.innerHTML = `<input type="checkbox" class="h-5 w-5 accent-green-700 flex-shrink-0"><div class="flex-1"><p class="font-semibold text-sm">${item.name} <span class="text-gray-500 font-normal text-xs">— ${Math.round(item.totalQty)}${item.unit} total</span></p><p class="text-xs text-gray-400">Used in: ${item.meals.map(m=>m.name).join(', ')}</p></div>`;
-        bGrid.appendChild(r);
-      });
-      prep.appendChild(bGrid);
-      sec.appendChild(prep);
-
-      // Auto Pantry (scroll position preserved by not re-rendering the entire tab)
-      const pantryCard = document.createElement('div'); pantryCard.className = 'card p-5';
-      pantryCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">🧂 Pantry <span class="text-xs text-gray-400 font-normal">(auto‑populated from spreadsheet)</span></h3><p class="text-xs text-gray-400 mb-3">✓ = stocked (won\'t appear in shopping list)</p>';
-      
-      const allDbIngredients = new Set();
-      Object.values(store.ingredientsMap).forEach(ings => ings.forEach(i => allDbIngredients.add(i.name)));
-      
-      const pantryList = document.createElement('div'); pantryList.className = 'space-y-2 max-h-72 overflow-y-auto';
-      [...allDbIngredients].sort().forEach(name => {
-        if (!isPantryCategory(name)) return;
-        const isStocked = isPantryStocked(name);
-        const row = document.createElement('div');
-        row.className = `flex items-center gap-3 py-2 px-3 rounded-xl ${isStocked ? 'bg-green-50' : 'bg-red-50'}`;
-        row.innerHTML = `
-          <input type="checkbox" class="h-5 w-5 accent-green-700 pantry-cb" ${isStocked ? 'checked' : ''}>
-          <span class="flex-1 text-sm font-medium ${isStocked ? 'text-green-800' : 'text-red-800'}">${name}</span>
-          <span class="text-xs text-gray-400">${isStocked ? '✅ Stocked' : '❌ Need to buy'}</span>`;
-        row.querySelector('.pantry-cb').addEventListener('change', (e) => {
-          if (e.target.checked) {
-            markPantryItem(name);
-          } else {
-            unmarkPantryItem(name);
-          }
-          // Update only this row's styling without full re-render
-          row.className = `flex items-center gap-3 py-2 px-3 rounded-xl ${e.target.checked ? 'bg-green-50' : 'bg-red-50'}`;
-          row.querySelector('span:first-of-type').className = `flex-1 text-sm font-medium ${e.target.checked ? 'text-green-800' : 'text-red-800'}`;
-          row.querySelector('span:last-of-type').textContent = e.target.checked ? '✅ Stocked' : '❌ Need to buy';
-          // Refresh shopping list if needed
-          if (store.activeTab === 'shopping') refreshUI();
-        });
-        pantryList.appendChild(row);
-      });
-      pantryCard.appendChild(pantryList);
-      sec.appendChild(pantryCard);
-
-      // Delivery Tracker
-      const track = document.createElement('div'); track.className = 'card p-5';
-      track.innerHTML = '<h3 class="font-semibold text-lg mb-4">📦 Delivery Tracker</h3>';
-      const tGrid = document.createElement('div'); tGrid.className = 'grid grid-cols-1 md:grid-cols-5 gap-3';
+      // Week Overview
+      const overview = document.createElement('div'); overview.className = 'card p-5';
+      overview.innerHTML = '<h3 class="font-semibold text-lg mb-4">📋 Weekly Plan Overview</h3>';
+      const grid = document.createElement('div'); grid.className = 'grid grid-cols-1 md:grid-cols-5 gap-4';
       DAYS.forEach(day => {
         const meal = store.selectedMeals[day];
-        const col = document.createElement('div'); col.className = 'border rounded-xl p-3';
-        col.innerHTML = `<p class="text-xs font-bold uppercase text-gray-500 mb-2">${day}</p>`;
+        const d = document.createElement('div'); d.className = 'border rounded-xl p-3';
+        d.innerHTML = `<p class="text-xs font-bold uppercase text-gray-500 mb-2">${day}</p>`;
         if (meal) {
-          col.innerHTML += `<p class="font-semibold text-sm">${meal['Meal Name']}</p>`;
-          ['Cooked','Packed','Delivered'].forEach(s => col.innerHTML += `<label class="flex items-center gap-2 mt-2 text-xs cursor-pointer"><input type="checkbox" class="accent-green-700 h-4 w-4"> <span>${s}</span></label>`);
-        } else col.innerHTML += '<p class="text-gray-300 text-xs">No meal</p>';
-        tGrid.appendChild(col);
+          d.innerHTML += `
+            <p class="font-semibold">${meal['Meal Name']}</p>
+            <p class="text-xs text-gray-500">${meal.Cuisine} · ${meal.Difficulty}</p>
+            <p class="text-xs">🔥 ${meal['Cal/Serve']} | 💪 ${meal['Protein (g)']}g</p>
+            <p class="text-xs text-red-500">⚠️ ${meal.Allergens || 'None'}</p>
+            <p class="text-xs text-gray-400">❄️ ${meal['Fridge Storage (days)']}d fridge</p>
+            <p class="text-xs italic">💡 ${meal['Meal Prep Notes'] || '-'}</p>`;
+        } else d.innerHTML += '<p class="text-gray-300 text-sm">Empty</p>';
+        grid.appendChild(d);
       });
-      track.appendChild(tGrid);
-      sec.appendChild(track);
+      overview.appendChild(grid);
+      sec.appendChild(overview);
 
-      // Allergens
-      const allergens = new Set(selectedMeals.flatMap(m=>(m.Allergens||'').split(',').map(s=>s.trim()).filter(Boolean)));
-      if (allergens.size) {
-        const aCard = document.createElement('div'); aCard.className = 'card p-5 border-red-200 bg-red-50';
-        aCard.innerHTML = `<h3 class="font-semibold text-lg mb-2 text-red-700">⚠️ Allergens</h3><p class="text-sm text-red-600">This week: ${[...allergens].join(', ')}</p>`;
-        sec.appendChild(aCard);
+      // Cooking Checklist
+      const checklist = document.createElement('div'); checklist.className = 'card p-5';
+      checklist.innerHTML = '<h3 class="font-semibold text-lg mb-4">✅ Chef\'s Cooking Checklist</h3>';
+      let hm = false;
+      DAYS.forEach(day => {
+        const meal = store.selectedMeals[day]; if (!meal) return;
+        hm = true;
+        const method = store.methodsMap[meal.ID] || 'No method recorded.';
+        const row = document.createElement('div'); row.className = 'py-3 border-b flex items-start gap-3';
+        row.innerHTML = `<input type="checkbox" class="mt-1 h-5 w-5 accent-green-700"><div><p class="font-semibold">${meal['Meal Name']} <span class="text-sm text-gray-500">(${day})</span></p><p class="text-sm text-gray-600 mt-1">${method.substring(0,120)}…</p></div>`;
+        checklist.appendChild(row);
+      });
+      if (!hm) checklist.innerHTML += '<p class="text-gray-400">No meals selected.</p>';
+      sec.appendChild(checklist);
+
+      // Activity Log
+      const logCard = document.createElement('div'); logCard.className = 'card p-5';
+      logCard.innerHTML = '<h3 class="font-semibold text-lg mb-4">📜 Plan Change History</h3>';
+      const log = (() => { try { return JSON.parse(localStorage.getItem('prepify_plan_log')||'[]'); } catch(e) { return []; } })().reverse().slice(0,10);
+      if (!log.length) logCard.innerHTML += '<p class="text-gray-400">No activity yet.</p>';
+      else {
+        const table = document.createElement('table'); table.className = 'w-full text-sm';
+        table.innerHTML = `<thead><tr class="text-left text-gray-500">${DAYS.map(d=>`<th>${d.substring(0,3)}</th>`).join('')}</tr></thead><tbody></tbody>`;
+        const tbody = table.querySelector('tbody');
+        log.forEach(entry => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td class="py-2 text-xs text-gray-400">${new Date(entry.timestamp).toLocaleDateString()}</td>`;
+          DAYS.forEach(day => {
+            const id = entry.plan[day];
+            const ml = id ? store.meals.find(m => m.ID == id) : null;
+            tr.innerHTML += `<td class="py-2 text-xs">${ml ? ml['Meal Name'].substring(0,12) : (id ? '#'+id : '—')}</td>`;
+          });
+          tbody.appendChild(tr);
+        });
+        logCard.appendChild(table);
       }
+      sec.appendChild(logCard);
+
+      // Settings
+      const settings = document.createElement('div'); settings.className = 'card p-5';
+      settings.innerHTML = '<h3 class="font-semibold text-lg mb-4">⚙️ Settings & Tools</h3>';
+      const resetBtn = document.createElement('button'); resetBtn.className = 'px-4 py-2 bg-red-500 text-white rounded-xl text-sm mr-3'; resetBtn.textContent = 'Reset All App Data';
+      resetBtn.onclick = () => { if (confirm('Clear all local data?')) { localStorage.clear(); location.reload(); } };
+      settings.appendChild(resetBtn);
+      const dlBtn = document.createElement('button'); dlBtn.className = 'px-4 py-2 bg-gray-800 text-white rounded-xl text-sm'; dlBtn.textContent = 'Download Plan JSON';
+      dlBtn.onclick = () => {
+        const data = { plan: {}, lastModified: Date.now() };
+        DAYS.forEach(d => { if (store.selectedMeals[d]) data.plan[d] = store.selectedMeals[d].ID; });
+        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+        const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'prepify-plan.json'; a.click();
+      };
+      settings.appendChild(dlBtn);
+      sec.appendChild(settings);
 
       container.appendChild(sec);
     }
@@ -696,7 +724,9 @@
       store.emit();
       refreshUI();
       setInterval(pullFromServer, 30000);
-      if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js');
+      }
     });
   </script>
 </body>
